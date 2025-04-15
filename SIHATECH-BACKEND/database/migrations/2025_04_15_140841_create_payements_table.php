@@ -16,7 +16,7 @@ return new class extends Migration
             $table->foreignId('doctor_id')->constrained('doctors')->onDelete('cascade');
             $table->foreignId('abonnement_id')->constrained('abonnements')->onDelete('cascade');
             $table->decimal('montant', 10, 2);
-            $table->enum('methode', ['cih_pay', 'paypal']);
+            $table->enum('methode', ['cmi', 'paypal']);
             $table->date('date');
             $table->timestamps();
         });

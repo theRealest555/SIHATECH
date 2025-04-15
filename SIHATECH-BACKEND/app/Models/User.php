@@ -6,21 +6,21 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Models\Doctor;
+use App\Models\Patient;
+use App\Models\Admin;
 
 class User extends Authenticatable
 {
-    use HasFactory, Notifiable;
+    protected $fillable = ['nom', 'prenom', 'email', 'telephone', 'mot_de_passe', 'role'];
+    use HasFactory, Notifiable, SoftDeletes;
 
     /**
      * The attributes that are mass assignable.
      *
      * @var array<int, string>
      */
-    protected $fillable = [
-        'name',
-        'email',
-        'password',
-    ];
 
     /**
      * The attributes that should be hidden for serialization.
@@ -43,5 +43,17 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    public function doctor() {
+        return $this->hasOne(Doctor::class);
+    }
+
+    public function patient() {
+        return $this->hasOne(Patient::class);
+    }
+
+    public function admin() {
+        return $this->hasOne(Admin::class);
     }
 }
