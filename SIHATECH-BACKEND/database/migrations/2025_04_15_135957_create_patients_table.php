@@ -6,25 +6,18 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('patients', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained()->onDelete('cascade');
-            $table->foreignId('medecin_favori_id')->nullable()->constrained('doctors');
-            $table->string('adresse');
-            $table->string('photo')->nullable();
+            $table->foreignId('user_id')->unique()->constrained()->cascadeOnDelete();
+            $table->foreignId('medecin_favori_id')->nullable()->constrained('doctors')->nullOnDelete();
             $table->timestamps();
-            $table->softDeletes();
+            
+            $table->index('medecin_favori_id');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('patients');
