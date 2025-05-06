@@ -5,34 +5,53 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\ValidationException;
 
 class AuthenticatedSessionController extends Controller
 {
     /**
      * Handle an incoming authentication request.
      */
-    public function store(LoginRequest $request): Response
+    public function store(LoginRequest $request)
     {
-        $request->authenticate();
-
-        $request->session()->regenerate();
-
-        return response()->noContent();
+        try {
+            // Use the authenticate method from LoginRequest
+            $request->authenticate();
+            
+            $user = $request->user();
+            
+            // Create new token with role as ability
+            $token = $user->createToken('auth-token', [$user->role])->plainTextToken;
+            
+            return response()->json([
+                'user' => $user,
+                'role' => $user->role,
+                'token' => $token,
+            ], 200);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => 'Invalid credentials',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Login failed',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
      * Destroy an authenticated session.
      */
-    public function destroy(Request $request): Response
+    public function destroy(Request $request)
     {
-        Auth::guard('web')->logout();
+        // For API-based authentication, just revoke the token
+        if ($request->user()) {
+            $request->user()->currentAccessToken()->delete();
+        }
 
-        $request->session()->invalidate();
-
-        $request->session()->regenerateToken();
-
-        return response()->noContent();
+        return response()->json(['message' => 'Logged out successfully'], 200);
     }
 }

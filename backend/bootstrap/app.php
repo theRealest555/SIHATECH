@@ -14,10 +14,14 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->api(prepend: [
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ]);
 
         $middleware->alias([
             'verified' => \App\Http\Middleware\EnsureEmailIsVerified::class,
+            'role' => \App\Http\Middleware\RoleMiddleware::class,
+            'verified.doctor' => \App\Http\Middleware\VerifiedDoctor::class,
+            'active.user' => \App\Http\Middleware\ActiveUser::class,
         ]);
 
         //

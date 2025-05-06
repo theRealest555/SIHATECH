@@ -2,32 +2,32 @@
 
 namespace App\Models;
 
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Illuminate\Database\Eloquent\SoftDeletes;
-use app\Models\admin as Admin;
-use app\Models\patient as Patient;
-use app\Models\doctor as doctor;
+use Laravel\Sanctum\HasApiTokens;
 
+/**
+ * @method \Laravel\Sanctum\NewAccessToken createToken(string $name, array $abilities = ['*'])
+ */
 
-class User extends Authenticatable
+class User extends Authenticatable implements MustVerifyEmail
 {
-    use HasFactory, Notifiable, SoftDeletes;
+    use  HasFactory, Notifiable, HasApiTokens;
+
+    protected $guard = 'web';
 
     protected $fillable = [
         'nom',
         'prenom',
-        'username',
         'email',
-        'telephone',
         'password',
-        'photo',
-        'adresse',
-        'sexe',
-        'date_de_naissance',
         'role',
-        'status'
+        'status',
+        'telephone',
+        'adresse',
+        'photo'
     ];
 
     protected $hidden = [
@@ -35,18 +35,14 @@ class User extends Authenticatable
         'remember_token',
     ];
 
-    protected function casts(): array
-    {
-        return [
-            'email_verified_at' => 'datetime',
-            'password' => 'hashed',
-            'date_de_naissance' => 'date',
-        ];
-    }
+    protected $casts = [
+        'email_verified_at' => 'datetime',
+    ];
 
+    // Relationships
     public function doctor()
     {
-        return $this->hasOne(doctor::class);
+        return $this->hasOne(Doctor::class);
     }
 
     public function patient()
@@ -54,8 +50,19 @@ class User extends Authenticatable
         return $this->hasOne(Patient::class);
     }
 
-    public function admin()
+    // Helpers
+    public function isDoctor()
     {
-        return $this->hasOne(Admin::class);
+        return $this->role === 'medecin';
+    }
+
+    public function isPatient()
+    {
+        return $this->role === 'patient';
+    }
+
+    public function isAdmin()
+    {
+        return $this->role === 'admin';
     }
 }
