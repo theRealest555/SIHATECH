@@ -15,9 +15,30 @@ class DatabaseSeeder extends Seeder
     {
         // User::factory(10)->create();
 
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
+        // User::factory()->create([
+        //     'name' => 'Test User',
+        //     'email' => 'test@example.com',
+        // ]);
+        $this->call([
+            // 1. Tables de référence sans dépendances
+            SpecialitiesTableSeeder::class,
+            LanguagesTableSeeder::class,
+
+            // 2. Utilisateurs de base
+            UserTableSeeder::class,
+
+            // 3. Rôles spécifiques
+            AdminsTableSeeder::class,
+            DoctorsTableSeeder::class,
+            PatientsTableSeeder::class,
+
+            // 4. Données opérationnelles
+            AbonnementsTableSeeder::class,
+            PayementsTableSeeder::class,
+            DocumentsTableSeeder::class,
+            RendezvousTableSeeder::class,
+            AvisTableSeeder::class,
+            AuditLogsTableSeeder::class,
         ]);
     }
 }
