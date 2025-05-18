@@ -23,6 +23,8 @@ return new class extends Migration
             $table->date('date_de_naissance')->nullable();
             $table->enum('role', ['patient', 'medecin', 'admin'])->default('patient');
             $table->enum('status', ['actif', 'inactif', 'en_attente'])->default('actif');
+            $table->string('provider')->nullable();
+            $table->string('provider_id')->nullable();
             $table->rememberToken();
             $table->timestamps();
         });

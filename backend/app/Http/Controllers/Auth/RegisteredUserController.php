@@ -9,7 +9,6 @@ use App\Models\Doctor;
 use App\Models\Admin;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules;
@@ -40,8 +39,6 @@ class RegisteredUserController extends Controller
             'speciality_id' => ['required_if:role,medecin', 'exists:specialities,id'],
         ]);
 
-
-
         $user = User::create([
             'nom' => $request->nom,
             'prenom' => $request->prenom,
@@ -69,14 +66,19 @@ class RegisteredUserController extends Controller
             ]);
         }
 
+        // Trigger the Registered event which sends verification email
         event(new Registered($user));
-
         
-        // Auth::login($user);
+        // Explicitly send verification email
+        $user->sendEmailVerificationNotification();
 
+        // Generate API token with role as ability
+        $token = $user->createToken('auth-token', [$user->role])->plainTextToken;
+        
         return response()->json([
-            'message' => 'Registration successful',
+            'message' => 'Registration successful. Please check your email to verify your account.',
             'user' => $user,
+            'token' => $token
         ]);
         } catch (ValidationException $e) {
             
