@@ -18,4 +18,8 @@ class Patient extends Model
     {
         return $this->belongsTo(Doctor::class, 'medecin_favori_id');
     }
+
+    public function rendezvous() {
+        return $this->hasMany(Rendezvous::class);
+    }
 }

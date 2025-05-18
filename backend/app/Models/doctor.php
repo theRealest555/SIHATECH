@@ -6,9 +6,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use App\Models\User as User;
-use App\Models\Speciality as Speciality;
-
 
 class Doctor extends Model
 {
@@ -19,13 +16,11 @@ class Doctor extends Model
         'speciality_id',
         'description',
         'horaires',
-        'is_verified'
+        'is_verified',
+        'is_active'
     ];
 
-    protected $casts = [
-        'horaires' => 'json',
-        'is_verified' => 'boolean'
-    ];
+    protected $casts = ['horaires' => 'array', 'is_verified' => 'boolean', 'is_active' => 'boolean'];
 
     public function user(): BelongsTo
     {
@@ -42,6 +37,21 @@ class Doctor extends Model
         return $this->hasMany(Document::class);
     }
 
+    public function location()
+    {
+        return $this->belongsTo(Location::class, 'location_id');
+    }
+
+    public function availabilities()
+    {
+        return $this->hasMany(Availability::class, 'doctor_id');
+    }
+
+    public function leaves(): HasMany
+    {
+        return $this->hasMany(Leave::class);
+    }
+
     public function languages(): BelongsToMany
     {
         return $this->belongsToMany(Language::class, 'doctor_language');
@@ -55,5 +65,10 @@ class Doctor extends Model
     public function verify(): void
     {
         $this->update(['is_verified' => true]);
+    }
+
+    public function appointments(): HasMany
+    {
+        return $this->hasMany(Rendezvous::class);
     }
 }

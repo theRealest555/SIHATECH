@@ -12,7 +12,6 @@ class UserTableSeeder extends Seeder
 {
     public function run()
     {
-        // Désactiver les contraintes de clé étrangère temporairement
         DB::statement('SET FOREIGN_KEY_CHECKS=0;');
         User::truncate();
         DB::statement('SET FOREIGN_KEY_CHECKS=1;');
@@ -42,7 +41,7 @@ class UserTableSeeder extends Seeder
                 'nom' => 'Dupont',
                 'prenom' => 'Jean',
                 'username' => 'dr_dupont',
-                'email' => 'j.dupont@medicall.com',
+                'email' => 'jean.dupont@medicall.com', // Match DoctorsTableSeeder
                 'email_verified_at' => Carbon::now(),
                 'telephone' => '0698765432',
                 'password' => Hash::make('Medecin123!'),
@@ -55,12 +54,11 @@ class UserTableSeeder extends Seeder
                 'created_at' => Carbon::now(),
                 'updated_at' => Carbon::now()
             ],
-
             [
                 'nom' => 'Martin',
                 'prenom' => 'Sophie',
                 'username' => 'dr_martin',
-                'email' => 's.martin@medicall.com',
+                'email' => 'sophie.martin@medicall.com', // Match DoctorsTableSeeder
                 'email_verified_at' => Carbon::now(),
                 'telephone' => '0687654321',
                 'password' => Hash::make('Medecin123!'),
@@ -73,8 +71,42 @@ class UserTableSeeder extends Seeder
                 'created_at' => Carbon::now(),
                 'updated_at' => Carbon::now()
             ],
+            [
+                'nom' => 'Bernard',
+                'prenom' => 'Pierre',
+                'username' => 'dr_bernard',
+                'email' => 'pierre.bernard@medicall.com', // Match DoctorsTableSeeder
+                'email_verified_at' => Carbon::now(),
+                'telephone' => '0634567890',
+                'password' => Hash::make('Medecin123!'),
+                'photo' => 'users/medecins/pierre.jpg',
+                'adresse' => '78 Rue Santé, 75000 Paris',
+                'sexe' => 'homme',
+                'date_de_naissance' => '1978-03-10',
+                'role' => 'medecin',
+                'status' => 'actif',
+                'created_at' => Carbon::now(),
+                'updated_at' => Carbon::now()
+            ],
+            [
+                'nom' => 'Petit',
+                'prenom' => 'Marie',
+                'username' => 'dr_petit',
+                'email' => 'marie.petit@medicall.com', // Match DoctorsTableSeeder
+                'email_verified_at' => Carbon::now(),
+                'telephone' => '0645678901',
+                'password' => Hash::make('Medecin123!'),
+                'photo' => 'users/medecins/marie.jpg',
+                'adresse' => '15 Avenue Médicale, 69000 Lyon',
+                'sexe' => 'femme',
+                'date_de_naissance' => '1985-09-25',
+                'role' => 'medecin',
+                'status' => 'actif',
+                'created_at' => Carbon::now(),
+                'updated_at' => Carbon::now()
+            ],
 
-            // Patients
+            // Patients (unchanged)
             [
                 'nom' => 'Bernard',
                 'prenom' => 'Alice',
@@ -92,7 +124,6 @@ class UserTableSeeder extends Seeder
                 'created_at' => Carbon::now(),
                 'updated_at' => Carbon::now()
             ],
-
             [
                 'nom' => 'Petit',
                 'prenom' => 'Thomas',
@@ -110,8 +141,6 @@ class UserTableSeeder extends Seeder
                 'created_at' => Carbon::now(),
                 'updated_at' => Carbon::now()
             ],
-
-            // Patient inactif
             [
                 'nom' => 'Durand',
                 'prenom' => 'Claire',
@@ -129,8 +158,6 @@ class UserTableSeeder extends Seeder
                 'created_at' => Carbon::now(),
                 'updated_at' => Carbon::now()
             ],
-
-            // Patient en attente
             [
                 'nom' => 'Leroy',
                 'prenom' => 'Marc',
@@ -156,6 +183,5 @@ class UserTableSeeder extends Seeder
                 $user
             );
         }
-
     }
 }
