@@ -1,9 +1,11 @@
 <?php
 
 namespace App\Http\Controllers;
-use App\Http\Controllers\Controller;
 
-abstract class Controller
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+
+class RendezvousController extends Controller
 {
     //
 }
