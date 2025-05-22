@@ -1,10 +1,9 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { getSlots, getAvailability } from "../services/api";
+import ApiService from "../services/api";
 import { Calendar, momentLocalizer } from "react-big-calendar";
 import moment from "moment";
 import "react-big-calendar/lib/css/react-big-calendar.css";
-import ApiService from "../services/api";
 
 const localizer = momentLocalizer(moment);
 
@@ -25,7 +24,7 @@ const DoctorCalendar = ({ doctorId: propDoctorId, mode }) => {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const availabilityResponse = await getAvailability(doctorId);
+                const availabilityResponse = await ApiService.getAvailability(doctorId);
                 const { schedule, leaves } = availabilityResponse.data.data;
 
                 const leaveEvents = leaves.map((leave) => ({
@@ -67,7 +66,7 @@ const DoctorCalendar = ({ doctorId: propDoctorId, mode }) => {
             try {
                 const dateString = moment(selectedDate).format("YYYY-MM-DD");
                 console.log("Fetching slots for doctor ID:", doctorId, "Date:", dateString);
-                const response = await getSlots(doctorId, dateString);
+                const response = await ApiService.getSlots(doctorId, dateString);
                 console.log("Fetched slots:", response.data.data);
                 setSlots(response.data.data);
                 setError(null);
@@ -102,9 +101,6 @@ const DoctorCalendar = ({ doctorId: propDoctorId, mode }) => {
             console.log(`Selected date timezone: ${selectedDate.toString()}`);
             console.log(`Slot value: ${slot}`);
 
-            // Remove the hardcoded validation - the backend will validate properly
-            // Let the backend handle the validation against the doctor's actual schedule
-            
             const appointmentData = {
                 doctor_id: doctorId,
                 patient_id: patientId,
@@ -118,7 +114,7 @@ const DoctorCalendar = ({ doctorId: propDoctorId, mode }) => {
             alert("Appointment booked successfully!");
             
             const dateString = moment(selectedDate).format("YYYY-MM-DD");
-            const slotsResponse = await getSlots(doctorId, dateString);
+            const slotsResponse = await ApiService.getSlots(doctorId, dateString);
             setSlots(slotsResponse.data.data);
         } catch (error) {
             console.error("Error booking appointment:", error);
@@ -136,7 +132,7 @@ const DoctorCalendar = ({ doctorId: propDoctorId, mode }) => {
                 }
                 try {
                     const dateString = moment(selectedDate).format("YYYY-MM-DD");
-                    const response = await getSlots(doctorId, dateString);
+                    const response = await ApiService.getSlots(doctorId, dateString);
                     setSlots(response.data.data);
                 } catch (slotError) {
                     console.error("Error refreshing slots:", slotError);
