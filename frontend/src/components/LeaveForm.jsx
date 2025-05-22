@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { getAvailability, createLeave, deleteLeave } from "../services/api";
+import ApiService from "../services/api";
 
 const LeaveForm = () => {
     const location = useLocation();
@@ -16,7 +16,7 @@ const LeaveForm = () => {
     useEffect(() => {
         const fetchLeaves = async () => {
             try {
-                const response = await getAvailability(doctorId);
+                const response = await ApiService.getAvailability(doctorId);
                 setLeaves(response.data.data.leaves);
                 setError(null);
             } catch (error) {
@@ -32,7 +32,7 @@ const LeaveForm = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            await createLeave(doctorId, { start_date: startDate, end_date: endDate, reason });
+            await ApiService.createLeave(doctorId, { start_date: startDate, end_date: endDate, reason });
             setError(null);
             navigate(`/doctor-calendar/${doctorId}`); // Redirect to the doctor's calendar
         } catch (error) {
@@ -43,7 +43,7 @@ const LeaveForm = () => {
 
     const handleDelete = async (leaveId) => {
         try {
-            await deleteLeave(doctorId, leaveId);
+            await ApiService.deleteLeave(doctorId, leaveId);
             setLeaves(leaves.filter((leave) => leave.id !== leaveId));
             setError(null);
         } catch (error) {
