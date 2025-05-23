@@ -9,13 +9,16 @@ use App\Models\Doctor;
 use App\Models\Leave;
 use App\Models\Rendezvous;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class AvailabilityController extends Controller
 {
-    public function getAvailability(Request $request, Doctor $doctor)
+    /**
+     * Get a doctor's availability (schedule and leaves)
+     */
+    public function getAvailability(Request $request, Doctor $doctor): JsonResponse
     {
         $leaves = Leave::where('doctor_id', $doctor->id)
             ->where('end_date', '>=', Carbon::today())
@@ -30,35 +33,38 @@ class AvailabilityController extends Controller
         ]);
     }
 
-    public function updateSchedule(UpdateScheduleRequest $request, Doctor $doctor)
+    /**
+     * Update a doctor's schedule
+     */
+    public function updateSchedule(UpdateScheduleRequest $request, Doctor $doctor): JsonResponse
     {
         $newSchedule = $request->validated()['schedule'];
 
         // Check for conflicts with existing appointments
         $conflicts = Rendezvous::where('doctor_id', $doctor->id)
-        ->whereNotIn('statut', ['annulé', 'terminé'])
-        ->whereDate('date_heure', '>=', Carbon::today())
-        ->get()
-        ->filter(function ($appointment) use ($newSchedule) {
-            $day = strtolower(Carbon::parse($appointment->date_heure)->format('l'));
-            $time = Carbon::parse($appointment->date_heure)->format('H:i');
-            $dailySchedule = $newSchedule[$day] ?? [];
+            ->whereNotIn('statut', ['annulé', 'terminé'])
+            ->whereDate('date_heure', '>=', Carbon::today())
+            ->get()
+            ->filter(function ($appointment) use ($newSchedule) {
+                $day = strtolower(Carbon::parse($appointment->date_heure)->format('l'));
+                $time = Carbon::parse($appointment->date_heure)->format('H:i');
+                $dailySchedule = $newSchedule[$day] ?? [];
 
-            foreach ($dailySchedule as $range) {
-                [$start, $end] = explode('-', $range);
-                if ($time >= $start && $time < $end) {
-                    return false; // Appointment fits in new schedule
+                foreach ($dailySchedule as $range) {
+                    [$start, $end] = explode('-', $range);
+                    if ($time >= $start && $time < $end) {
+                        return false; // Appointment fits in new schedule
+                    }
                 }
-            }
-            return true; // Conflict found
-        });
+                return true; // Conflict found
+            });
 
-    if ($conflicts->isNotEmpty()) {
-        return response()->json([
-            'status' => 'error',
-            'message' => 'Le nouvel horaire entre en conflit avec des rendez-vous existants.'
-        ], 409);
-    }
+        if ($conflicts->isNotEmpty()) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Le nouvel horaire entre en conflit avec des rendez-vous existants.'
+            ], 409);
+        }
 
         $doctor->update(['horaires' => json_encode($newSchedule)]);
 
@@ -70,7 +76,10 @@ class AvailabilityController extends Controller
         ]);
     }
 
-    public function createLeave(CreateLeaveRequest $request, Doctor $doctor)
+    /**
+     * Create a leave period for a doctor
+     */
+    public function createLeave(CreateLeaveRequest $request, Doctor $doctor): JsonResponse
     {
         $data = $request->validated();
 
@@ -89,6 +98,7 @@ class AvailabilityController extends Controller
                 'start_date' => $data['start_date'],
                 'end_date' => $data['end_date']
             ]);
+
             return response()->json([
                 'status' => 'error',
                 'message' => 'La période de congé entre en conflit avec des rendez-vous existants.'
@@ -99,7 +109,7 @@ class AvailabilityController extends Controller
             'doctor_id' => $doctor->id,
             'start_date' => $data['start_date'],
             'end_date' => $data['end_date'],
-            'reason' => $data['reason'],
+            'reason' => $data['reason'] ?? null,
         ]);
 
         Log::info('Leave created', ['leave_id' => $leave->id, 'doctor_id' => $doctor->id]);
@@ -110,7 +120,10 @@ class AvailabilityController extends Controller
         ], 201);
     }
 
-    public function deleteLeave(Request $request, Doctor $doctor, Leave $leave)
+    /**
+     * Delete a leave period
+     */
+    public function deleteLeave(Request $request, Doctor $doctor, Leave $leave): JsonResponse
     {
         if ($leave->doctor_id !== $doctor->id) {
             return response()->json([

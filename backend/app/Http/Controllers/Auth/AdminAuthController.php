@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Admin;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
@@ -15,7 +16,7 @@ class AdminAuthController extends Controller
     /**
      * Handle an admin login request.
      */
-    public function login(Request $request)
+    public function login(Request $request): JsonResponse
     {
         try {
             $request->validate([
@@ -33,9 +34,9 @@ class AdminAuthController extends Controller
                 ]);
             }
 
-            // Create token for the found user (not request->user())
+            // Create token for the found user
             $token = $user->createToken('admin-token', ['admin'])->plainTextToken;
-            
+
             return response()->json([
                 'user' => $user,
                 'token' => $token,
@@ -57,7 +58,7 @@ class AdminAuthController extends Controller
     /**
      * Logout the admin.
      */
-    public function logout(Request $request)
+    public function logout(Request $request): JsonResponse
     {
         if ($request->user()) {
             $request->user()->currentAccessToken()->delete();

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
@@ -12,18 +13,20 @@ class AuthenticatedSessionController extends Controller
 {
     /**
      * Handle an incoming authentication request.
+     *
+     * @throws \Illuminate\Validation\ValidationException
      */
-    public function store(LoginRequest $request)
+    public function store(LoginRequest $request): JsonResponse
     {
         try {
             // Use the authenticate method from LoginRequest
             $request->authenticate();
-            
+
             $user = $request->user();
-            
+
             // Create new token with role as ability
             $token = $user->createToken('auth-token', [$user->role])->plainTextToken;
-            
+
             return response()->json([
                 'user' => $user,
                 'role' => $user->role,
@@ -45,7 +48,7 @@ class AuthenticatedSessionController extends Controller
     /**
      * Destroy an authenticated session.
      */
-    public function destroy(Request $request)
+    public function destroy(Request $request): JsonResponse
     {
         // For API-based authentication, just revoke the token
         if ($request->user()) {

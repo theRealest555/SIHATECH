@@ -2,42 +2,61 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Doctor;
 use App\Models\Speciality;
 use App\Models\Leave;
+use App\Models\Availability;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class DoctorController extends Controller
 {
-    public function index()
-{
-    $doctors = Doctor::with(['user', 'speciality'])->get()->map(fn($doctor) => [
-        'id' => $doctor->id,
-        'name' => $doctor->user ? ($doctor->user->prenom . ' ' . $doctor->user->nom) : 'N/A',
-        'speciality' => $doctor->speciality ? $doctor->speciality->nom : 'N/A',
-    ]);
-    return response()->json(['data' => $doctors]);
-}
+    /**
+     * Display a listing of doctors.
+     */
+    public function index(): JsonResponse
+    {
+        $doctors = Doctor::with(['user', 'speciality'])
+            ->get()
+            ->map(fn($doctor) => [
+                'id' => $doctor->id,
+                'name' => $doctor->user ? ($doctor->user->prenom . ' ' . $doctor->user->nom) : 'N/A',
+                'speciality' => $doctor->speciality ? $doctor->speciality->nom : 'N/A',
+            ]);
 
-    public function specialities()
+        return response()->json(['data' => $doctors]);
+    }
+
+    /**
+     * Get all specialities.
+     */
+    public function specialities(): JsonResponse
     {
         $specialities = Speciality::pluck('nom');
         return response()->json(['data' => $specialities]);
     }
 
-    public function locations()
-{
-    $locations = Doctor::with('user')
-        ->distinct('user.adresse') // Ensure distinct addresses
-        ->get()
-        ->pluck('user.adresse')
-        ->filter()
-        ->values();
-    return response()->json(['data' => $locations]);
-}
+    /**
+     * Get all doctor locations.
+     */
+    public function locations(): JsonResponse
+    {
+        $locations = Doctor::with('user')
+            ->distinct('user.adresse')
+            ->get()
+            ->pluck('user.adresse')
+            ->filter()
+            ->values();
 
-    public function search(Request $request)
+        return response()->json(['data' => $locations]);
+    }
+
+    /**
+     * Search for doctors with filters.
+     */
+    public function search(Request $request): JsonResponse
     {
         $speciality = $request->query('speciality');
         $location = $request->query('location');
@@ -63,119 +82,159 @@ class DoctorController extends Controller
         return response()->json(['data' => $doctors]);
     }
 
-    public function availability($doctorId)
+    /**
+     * Get a doctor's availability.
+     */
+    public function availability(int $doctorId): JsonResponse
     {
         try {
             $doctor = Doctor::findOrFail($doctorId);
             $schedule = $doctor->availabilities->groupBy('day_of_week')->map->pluck('time_range');
             $leaves = $doctor->leaves;
+
             return response()->json(['data' => ['schedule' => $schedule, 'leaves' => $leaves]]);
         } catch (\Exception $e) {
-            \Log::error('Error fetching availability for doctor ID ' . $doctorId . ': ' . $e->getMessage(), [
+            Log::error('Error fetching availability for doctor ID ' . $doctorId . ': ' . $e->getMessage(), [
                 'trace' => $e->getTraceAsString()
             ]);
+
             return response()->json(['error' => 'Failed to fetch availability'], 500);
         }
     }
 
-    public function slots($doctorId, Request $request)
+    /**
+     * Get available slots for a doctor on a specific date.
+     */
+    public function slots(int $doctorId, Request $request): JsonResponse
     {
         try {
             $date = $request->query('date', now()->toDateString());
             $doctor = Doctor::findOrFail($doctorId);
             $slots = $this->getAvailableSlots($doctor, $date);
+
             return response()->json(['data' => $slots]);
         } catch (\Exception $e) {
-            \Log::error('Error fetching slots for doctor ID ' . $doctorId . ': ' . $e->getMessage(), [
+            Log::error('Error fetching slots for doctor ID ' . $doctorId . ': ' . $e->getMessage(), [
                 'trace' => $e->getTraceAsString()
             ]);
+
             return response()->json(['error' => 'Failed to fetch slots'], 500);
         }
     }
 
-public function getAvailableSlots($doctor, $date)
-{
-    try {
-        $dayOfWeek = strtolower(now()->parse($date)->format('l'));
-        $leaves = $doctor->leaves->filter(fn($leave) => now()->parse($date)->between($leave->start_date, $leave->end_date));
-        if ($leaves->isNotEmpty()) {
-            \Log::info('No slots available due to leave', [
+    /**
+     * Helper method to get available slots for a doctor.
+     */
+    protected function getAvailableSlots(Doctor $doctor, string $date): array
+    {
+        try {
+            $dayOfWeek = strtolower(now()->parse($date)->format('l'));
+
+            // Check if doctor is on leave
+            $leaves = $doctor->leaves->filter(fn($leave) =>
+                now()->parse($date)->between($leave->start_date, $leave->end_date));
+
+            if ($leaves->isNotEmpty()) {
+                Log::info('No slots available due to leave', [
+                    'doctor_id' => $doctor->id,
+                    'date' => $date,
+                    'leaves' => $leaves->toArray(),
+                ]);
+                return [];
+            }
+
+            // Get doctor's schedule for the day
+            $schedule = $doctor->availabilities->where('day_of_week', $dayOfWeek);
+
+            // Get existing appointments
+            $appointments = $doctor->appointments->filter(fn($appt) =>
+                now()->parse($appt->date_heure)->isSameDay(now()->parse($date)));
+
+            $slots = [];
+
+            // Generate slots from schedule
+            foreach ($schedule as $range) {
+                if (!$range->time_range) {
+                    continue;
+                }
+
+                $timeRange = explode('-', $range->time_range);
+                if (count($timeRange) !== 2) {
+                    continue;
+                }
+
+                $start = now()->parse("$date {$timeRange[0]}");
+                $end = now()->parse("$date {$timeRange[1]}");
+
+                while ($start < $end) {
+                    $slotEnd = $start->copy()->addMinutes(30);
+
+                    // Check if slot is available
+                    if (!$appointments->first(fn($appt) =>
+                        now()->parse($appt->date_heure)->eq($start))) {
+                        $slots[] = $start->format('H:i');
+                    }
+
+                    $start = $slotEnd;
+                }
+            }
+
+            Log::info('Slots generated', [
                 'doctor_id' => $doctor->id,
                 'date' => $date,
-                'leaves' => $leaves->toArray(),
+                'day_of_week' => $dayOfWeek,
+                'slots' => $slots,
             ]);
-            return [];
+
+            return $slots;
+        } catch (\Exception $e) {
+            Log::error('Error in getAvailableSlots for doctor ID ' . $doctor->id . ': ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
         }
+    }
 
-        $schedule = $doctor->availabilities->where('day_of_week', $dayOfWeek);
-        $appointments = $doctor->appointments->filter(fn($appt) => now()->parse($appt->start_time)->isSameDay(now()->parse($date)));
+    /**
+     * Update a doctor's schedule.
+     */
+    public function updateSchedule(Request $request, int $doctorId): JsonResponse
+    {
+        $request->validate([
+            'monday' => 'array',
+            'tuesday' => 'array',
+            'wednesday' => 'array',
+            'thursday' => 'array',
+            'friday' => 'array',
+            'saturday' => 'array',
+            'sunday' => 'array',
+        ]);
 
-        $slots = [];
-        foreach ($schedule as $range) {
-            if (!$range->time_range) {
-                continue;
-            }
-            $timeRange = explode('-', $range->time_range);
-            if (count($timeRange) !== 2) {
-                continue;
-            }
-            $start = now()->parse("$date {$timeRange[0]}");
-            $end = now()->parse("$date {$timeRange[1]}");
-            while ($start < $end) {
-                $slotEnd = $start->copy()->addMinutes(30);
-                if (!$appointments->first(fn($appt) => now()->parse($appt->start_time)->eq($start))) {
-                    $slots[] = $start->format('H:i');
+        $doctor = Doctor::findOrFail($doctorId);
+
+        // Delete existing schedule
+        $doctor->availabilities()->delete();
+
+        // Create new schedule
+        $days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+        foreach ($days as $day) {
+            if ($request->has($day)) {
+                foreach ($request->input($day) as $timeRange) {
+                    $doctor->availabilities()->create([
+                        'day_of_week' => $day,
+                        'time_range' => $timeRange,
+                    ]);
                 }
-                $start = $slotEnd;
             }
         }
-        \Log::info('Slots generated', [
-            'doctor_id' => $doctor->id,
-            'date' => $date,
-            'day_of_week' => $dayOfWeek,
-            'slots' => $slots,
-        ]);
-        return $slots;
-    } catch (\Exception $e) {
-        \Log::error('Error in getAvailableSlots for doctor ID ' . $doctor->id . ': ' . $e->getMessage(), [
-            'trace' => $e->getTraceAsString()
-        ]);
-        throw $e;
-    }
-}
 
-public function updateSchedule(Request $request, $doctorId)
-{
-    $request->validate([
-        'monday' => 'array',
-        'tuesday' => 'array',
-        'wednesday' => 'array',
-        'thursday' => 'array',
-        'friday' => 'array',
-        'saturday' => 'array',
-        'sunday' => 'array',
-    ]);
-
-    $doctor = Doctor::findOrFail($doctorId);
-
-    $doctor->availabilities()->delete();
-
-    $days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-    foreach ($days as $day) {
-        if ($request->has($day)) {
-            foreach ($request->input($day) as $timeRange) {
-                $doctor->availabilities()->create([
-                    'day_of_week' => $day,
-                    'time_range' => $timeRange,
-                ]);
-            }
-        }
+        return response()->json(['message' => 'Schedule updated successfully']);
     }
 
-    return response()->json(['message' => 'Schedule updated successfully']);
-}
-
-    public function createLeave(Request $request, $doctorId)
+    /**
+     * Create a leave period for a doctor.
+     */
+    public function createLeave(Request $request, int $doctorId): JsonResponse
     {
         $request->validate([
             'start_date' => 'required|date',
@@ -189,31 +248,35 @@ public function updateSchedule(Request $request, $doctorId)
         return response()->json(['data' => $leave], 201);
     }
 
-    public function deleteLeave($doctorId, $leaveId, Request $request)
-{
-    \Log::info('deleteLeave called', ['doctorId' => $doctorId, 'leaveId' => $leaveId]);
-    $user = auth()->guard('sanctum')->user();
-    \Log::info('Authenticated user', ['user' => $user ? $user->toArray() : null]);
+    /**
+     * Delete a leave period.
+     */
+    public function deleteLeave(int $doctorId, int $leaveId, Request $request): JsonResponse
+    {
+        Log::info('deleteLeave called', ['doctorId' => $doctorId, 'leaveId' => $leaveId]);
 
-    if ($user->id != $doctorId || $user->role !== 'medecin') {
-        \Log::warning('Unauthorized access attempt', ['user_id' => $user->id, 'role' => $user->role]);
-        return response()->json(['message' => 'Unauthorized'], 403);
+        $user = auth()->guard('sanctum')->user();
+        Log::info('Authenticated user', ['user' => $user ? json_decode(json_encode($user), true) : null]);
+
+        if ($user && $user->id != $doctorId && $user->role !== 'medecin') {
+        Log::info('Authenticated user', ['user' => $user ? json_decode(json_encode($user), true) : null]);
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $leave = Leave::where('id', $leaveId)->where('doctor_id', $doctorId)->first();
+        Log::info('Leave query result', ['leave' => $leave ? $leave->toArray() : null]);
+
+        if (!$leave) {
+            Log::warning('Leave not found', ['doctorId' => $doctorId, 'leaveId' => $leaveId]);
+            return response()->json(['message' => 'Leave not found'], 404);
+        }
+
+        $leave->delete();
+        Log::info('Leave deleted', ['leaveId' => $leaveId]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Leave deleted successfully'
+        ]);
     }
-
-    $leave = Leave::where('id', $leaveId)->where('doctor_id', $doctorId)->first();
-    \Log::info('Leave query result', ['leave' => $leave ? $leave->toArray() : null]);
-
-    if (!$leave) {
-        \Log::warning('Leave not found', ['doctorId' => $doctorId, 'leaveId' => $leaveId]);
-        return response()->json(['message' => 'Leave not found'], 404);
-    }
-
-    $leave->delete();
-    \Log::info('Leave deleted', ['leaveId' => $leaveId]);
-
-    return response()->json([
-        'status' => 'success',
-        'message' => 'Leave deleted successfully'
-    ]);
-}
 }

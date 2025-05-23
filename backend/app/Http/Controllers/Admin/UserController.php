@@ -8,17 +8,21 @@ use App\Models\Doctor;
 use App\Models\Patient;
 use App\Models\Admin as AdminModel;
 use App\Models\AuditLog;
+use App\Http\Requests\Admin\StoreAdminRequest;
+use App\Http\Requests\Admin\UpdateUserStatusRequest;
+use App\Http\Requests\Admin\UpdateAdminStatusRequest;
+use App\Http\Requests\Admin\ResetPasswordRequest;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Auth;
 
 class UserController extends Controller
 {
     /**
      * Display a listing of users.
      */
-    public function index(Request $request)
+    public function index(Request $request): JsonResponse
     {
         if (!$this->checkAdminPermission($request)) {
             return response()->json(['message' => 'Unauthorized access'], 403);
@@ -49,19 +53,13 @@ class UserController extends Controller
     /**
      * Store a newly created admin user.
      */
-    public function storeAdmin(Request $request)
+    public function storeAdmin(StoreAdminRequest $request): JsonResponse
     {
         if (!$this->checkAdminPermission($request)) {
             return response()->json(['message' => 'Unauthorized access'], 403);
         }
 
-        $validated = $request->validate([
-            'nom' => ['required', 'string', 'max:255'],
-            'prenom' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
-            'password' => ['required', 'string', 'min:8'],
-            'telephone' => ['nullable', 'string', 'max:20'],
-        ]);
+        $validated = $request->validated();
 
         try {
             $user = User::create([
@@ -82,7 +80,7 @@ class UserController extends Controller
             $admin = $request->user();
 
             AuditLog::create([
-                'user_id' => $admin->id, // Changed from $admin->user_id
+                'user_id' => $admin->id,
                 'action' => 'created_admin',
                 'target_type' => 'user',
                 'target_id' => $user->id,
@@ -106,15 +104,13 @@ class UserController extends Controller
     /**
      * Update an admin's status.
      */
-    public function updateAdminStatus(Request $request, $id)
+    public function updateAdminStatus(UpdateAdminStatusRequest $request, int $id): JsonResponse
     {
         if (!$this->checkAdminPermission($request)) {
             return response()->json(['message' => 'Unauthorized access'], 403);
         }
 
-        $validated = $request->validate([
-            'admin_status' => ['required', 'in:1,0'],
-        ]);
+        $validated = $request->validated();
 
         try {
             $admin = AdminModel::findOrFail($id);
@@ -142,7 +138,7 @@ class UserController extends Controller
     /**
      * Display the specified user.
      */
-    public function show(Request $request, $id)
+    public function show(Request $request, int $id): JsonResponse
     {
         if (!$this->checkAdminPermission($request)) {
             return response()->json(['message' => 'Unauthorized access'], 403);
@@ -182,15 +178,13 @@ class UserController extends Controller
     /**
      * Update the specified user's status.
      */
-    public function updateStatus(Request $request, $id)
+    public function updateStatus(UpdateUserStatusRequest $request, int $id): JsonResponse
     {
         if (!$this->checkAdminPermission($request)) {
             return response()->json(['message' => 'Unauthorized access'], 403);
         }
 
-        $validated = $request->validate([
-            'status' => ['required', 'in:actif,inactif,en_attente'],
-        ]);
+        $validated = $request->validated();
 
         try {
             $user = User::findOrFail($id);
@@ -218,15 +212,13 @@ class UserController extends Controller
     /**
      * Reset user password.
      */
-    public function resetPassword(Request $request, $id)
+    public function resetPassword(ResetPasswordRequest $request, int $id): JsonResponse
     {
         if (!$this->checkAdminPermission($request)) {
             return response()->json(['message' => 'Unauthorized access'], 403);
         }
 
-        $validated = $request->validate([
-            'password' => ['required', 'string', 'min:8'],
-        ]);
+        $validated = $request->validated();
 
         try {
             $user = User::findOrFail($id);
@@ -252,7 +244,7 @@ class UserController extends Controller
     /**
      * Delete the specified user.
      */
-    public function destroy(Request $request, $id)
+    public function destroy(Request $request, int $id): JsonResponse
     {
         if (!$this->checkAdminPermission($request)) {
             return response()->json(['message' => 'Unauthorized access'], 403);
@@ -284,7 +276,7 @@ class UserController extends Controller
     /**
      * Check if the user is an active admin.
      */
-    private function checkAdminPermission(Request $request)
+    private function checkAdminPermission(Request $request): bool
     {
         $user = $request->user();
 

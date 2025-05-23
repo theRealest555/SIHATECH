@@ -5,11 +5,13 @@ namespace App\Http\Controllers\Doctor;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Doctor;
+use App\Http\Requests\Doctor\UpdateProfileRequest;
+use App\Http\Requests\Doctor\UpdatePasswordRequest;
+use App\Http\Requests\Doctor\CompleteProfileRequest;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\Rule;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 class ProfileController extends Controller
@@ -17,11 +19,11 @@ class ProfileController extends Controller
     /**
      * Get the authenticated doctor's profile.
      */
-    public function show(Request $request)
+    public function show(Request $request): JsonResponse
     {
         $user = $request->user();
         $doctor = $user->doctor()->with(['speciality', 'documents'])->first();
-        
+
         return response()->json([
             'user' => $user,
             'doctor' => $doctor,
@@ -31,39 +33,27 @@ class ProfileController extends Controller
     /**
      * Update the doctor's profile information.
      */
-    public function update(Request $request)
+    public function update(UpdateProfileRequest $request): JsonResponse
     {
         $user = $request->user();
-
-        $request->validate([
-            'nom' => ['required', 'string', 'max:255'],
-            'prenom' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255', Rule::unique('users')->ignore($user->id)],
-            'telephone' => ['nullable', 'string', 'max:20'],
-            'adresse' => ['nullable', 'string'],
-            'sexe' => ['nullable', 'in:homme,femme'],
-            'date_de_naissance' => ['nullable', 'date'],
-            'description' => ['nullable', 'string'],
-            'speciality_id' => ['required', 'exists:specialities,id'],
-            'horaires' => ['nullable', 'json'],
-        ]);
+        $validated = $request->validated();
 
         // Update user data
         $user->update([
-            'nom' => $request->nom,
-            'prenom' => $request->prenom,
-            'email' => $request->email,
-            'telephone' => $request->telephone,
-            'adresse' => $request->adresse,
-            'sexe' => $request->sexe,
-            'date_de_naissance' => $request->date_de_naissance,
+            'nom' => $validated['nom'],
+            'prenom' => $validated['prenom'],
+            'email' => $validated['email'],
+            'telephone' => $validated['telephone'],
+            'adresse' => $validated['adresse'],
+            'sexe' => $validated['sexe'],
+            'date_de_naissance' => $validated['date_de_naissance'],
         ]);
 
         // Update doctor specific data
         $user->doctor()->update([
-            'speciality_id' => $request->speciality_id,
-            'description' => $request->description,
-            'horaires' => $request->horaires,
+            'speciality_id' => $validated['speciality_id'],
+            'description' => $validated['description'],
+            'horaires' => $validated['horaires'],
         ]);
 
         return response()->json([
@@ -76,23 +66,19 @@ class ProfileController extends Controller
     /**
      * Update the doctor's password.
      */
-    public function updatePassword(Request $request)
+    public function updatePassword(UpdatePasswordRequest $request): JsonResponse
     {
-        $request->validate([
-            'current_password' => ['required', 'string'],
-            'password' => ['required', 'string', 'min:8', 'confirmed'],
-        ]);
-
+        $validated = $request->validated();
         $user = $request->user();
 
-        if (!Hash::check($request->current_password, $user->password)) {
+        if (!Hash::check($validated['current_password'], $user->password)) {
             return response()->json([
                 'message' => 'The current password is incorrect.',
             ], 422);
         }
 
         $user->update([
-            'password' => Hash::make($request->password),
+            'password' => Hash::make($validated['password']),
         ]);
 
         return response()->json([
@@ -103,23 +89,21 @@ class ProfileController extends Controller
     /**
      * Update profile photo.
      */
-    public function updatePhoto(Request $request)
+    public function updatePhoto(Request $request): JsonResponse
     {
         $request->validate([
             'photo' => ['required', 'image', 'max:5120'], // 5MB max
         ]);
 
         $user = $request->user();
-        
+
         if ($user->photo) {
-            // Delete previous photo
-            if (file_exists(public_path('storage/' . $user->photo))) {
-                unlink(public_path('storage/' . $user->photo));
-            }
+            // Delete previous photo if it exists
+            Storage::disk('public')->delete($user->photo);
         }
-        
+
         $path = $request->file('photo')->store('doctors', 'public');
-        
+
         $user->update([
             'photo' => $path
         ]);
@@ -130,25 +114,15 @@ class ProfileController extends Controller
         ]);
     }
 
-    public function completeProfile(Request $request): JsonResponse
+    /**
+     * Complete profile after social registration.
+     */
+    public function completeProfile(CompleteProfileRequest $request): JsonResponse
     {
         try {
             $user = $request->user();
-            
-            // Validate the user is a doctor
-            if ($user->role !== 'medecin') {
-                return response()->json(['message' => 'Unauthorized. User is not a doctor'], 403);
-            }
-            
-            // Validate request
-            $validated = $request->validate([
-                'speciality_id' => ['required', 'exists:specialities,id'],
-                'telephone' => ['nullable', 'string', 'max:20'],
-                'adresse' => ['nullable', 'string', 'max:255'],
-                'sexe' => ['nullable', 'string', 'in:homme,femme'],
-                'date_de_naissance' => ['nullable', 'date', 'before:today'],
-            ]);
-            
+            $validated = $request->validated();
+
             // Update user info
             $user->update([
                 'telephone' => $validated['telephone'] ?? $user->telephone,
@@ -156,19 +130,19 @@ class ProfileController extends Controller
                 'sexe' => $validated['sexe'] ?? $user->sexe,
                 'date_de_naissance' => $validated['date_de_naissance'] ?? $user->date_de_naissance,
             ]);
-            
+
             // Update doctor's speciality
             if ($user->doctor) {
                 $user->doctor()->update([
                     'speciality_id' => $validated['speciality_id'],
                 ]);
             }
-            
+
             return response()->json([
                 'message' => 'Profile completed successfully',
                 'user' => $user->fresh(['doctor']),
             ]);
-            
+
         } catch (ValidationException $e) {
             return response()->json([
                 'message' => 'Validation failed',
