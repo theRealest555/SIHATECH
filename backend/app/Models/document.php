@@ -17,16 +17,16 @@ class Document extends Model
         'admin_id',
         'verified_at'
     ];
-    
+
     protected $casts = [
         'verified_at' => 'datetime',
     ];
-    
+
     public function doctor(): BelongsTo
     {
         return $this->belongsTo(Doctor::class);
     }
-    
+
     public function admin(): BelongsTo
     {
         return $this->belongsTo(User::class, 'admin_id');

@@ -14,4 +14,3 @@ class Speciality extends Model
         return $this->hasMany(Doctor::class);
     }
 }
-

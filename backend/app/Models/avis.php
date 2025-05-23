@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class avis extends Model
+class Avis extends Model
 {
     //
 }

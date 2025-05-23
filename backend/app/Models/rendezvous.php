@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class rendezvous extends Model
+class Rendezvous extends Model
 {
     protected $table = 'rendezvous';
     protected $fillable = ['patient_id', 'doctor_id', 'date_heure', 'statut'];
@@ -16,5 +16,5 @@ class rendezvous extends Model
     public function patient() {
         return $this->belongsTo(Patient::class, 'patient_id');
     }
-    
+
 }
