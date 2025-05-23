@@ -1,54 +1,104 @@
-import { useState } from 'react';
-import { useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { Container, Row, Col, Card, Form, Button, Alert } from 'react-bootstrap';
-import axios from 'axios';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
+import { Container, Row, Col, Card, Form, Button, Alert, Spinner } from 'react-bootstrap';
+import { useDispatch, useSelector } from 'react-redux';
+import { login, selectAuthStatus, selectAuthError } from '../../redux/slices/authSlice';
+import { loginSchema } from '../../utils/validation';
+import { initializeCSRF } from '../../api/axios';
+import { toast } from 'react-toastify';
 
 const Login = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const dispatch = useDispatch();
+  const authStatus = useSelector(selectAuthStatus);
+  const authError = useSelector(selectAuthError);
+  
   const [formData, setFormData] = useState({
     email: '',
     password: '',
   });
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState({});
+  const [socialAuthError, setSocialAuthError] = useState(null);
 
-useEffect(() => {
-  const handleMessage = (event) => {
-    if (event.data.type === 'SOCIAL_AUTH_SUCCESS') {
-      localStorage.setItem('token', event.data.data.token);
-      localStorage.setItem('user', JSON.stringify(event.data.data.user));
-      navigate('/dashboard');
-    } else if (event.data.type === 'SOCIAL_AUTH_ERROR') {
-      setError(event.data.error);
+  useEffect(() => {
+    // Initialize CSRF token
+    initializeCSRF();
+    
+    // Listen for social auth messages from popup window
+    const handleMessage = (event) => {
+      if (event.data.type === 'SOCIAL_AUTH_SUCCESS') {
+        // Redirect to dashboard
+        navigate('/dashboard');
+      } else if (event.data.type === 'SOCIAL_AUTH_ERROR') {
+        setSocialAuthError(event.data.error);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [navigate]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData({ ...formData, [name]: value });
+    
+    // Clear field-specific error when user types
+    if (errors[name]) {
+      setErrors({ ...errors, [name]: null });
     }
   };
 
-  window.addEventListener('message', handleMessage);
-  return () => window.removeEventListener('message', handleMessage);
-}, []);
-
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+  const validateForm = async () => {
+    try {
+      await loginSchema.validate(formData, { abortEarly: false });
+      return true;
+    } catch (validationError) {
+      const newErrors = {};
+      validationError.inner.forEach((error) => {
+        newErrors[error.path] = error.message;
+      });
+      setErrors(newErrors);
+      return false;
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    setError(null);
+    
+    // Clear previous errors
+    setErrors({});
+    setSocialAuthError(null);
+    
+    // Validate form
+    const isValid = await validateForm();
+    if (!isValid) return;
 
-    try {
-      const response = await axios.post('http://localhost:8000/api/login', formData);
-      if (response.data.token) {
-        localStorage.setItem('token', response.data.token);
-        localStorage.setItem('user', JSON.stringify(response.data.user));
-        navigate('/dashboard');
-      }
-    } catch (err) {
-      setError(err.response?.data?.message || 'Login failed. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+    // Dispatch login action
+    dispatch(login(formData))
+      .unwrap()
+      .then(() => {
+        // Redirect to intended page or dashboard
+        const from = location.state?.from?.pathname || '/dashboard';
+        navigate(from);
+      })
+      .catch((error) => {
+        // Handle specific validation errors from backend
+        if (error.errors) {
+          const newErrors = {};
+          Object.entries(error.errors).forEach(([key, messages]) => {
+            newErrors[key] = messages[0];
+          });
+          setErrors(newErrors);
+        }
+        
+        // Show error toast
+        toast.error(error.message || 'Login failed');
+      });
+  };
+
+  const handleSocialAuth = (provider) => {
+    window.location.href = `http://localhost:8000/api/auth/social/${provider}/redirect`;
   };
 
   return (
@@ -64,27 +114,30 @@ useEffect(() => {
                   <p className="text-muted">Sign in to your account</p>
                 </div>
 
-                {error && (
+                {(authError || socialAuthError) && (
                   <Alert variant="danger" className="fade-in">
                     <i className="fas fa-exclamation-triangle me-2"></i>
-                    {error}
+                    {socialAuthError || authError}
                   </Alert>
                 )}
 
-                <Form onSubmit={handleSubmit}>
+                <Form onSubmit={handleSubmit} noValidate>
                   <Form.Group className="mb-3">
                     <Form.Label>
-                                          <i className="fas fa-envelope me-2" />{' '}Email Address
-                                        </Form.Label>
+                      <i className="fas fa-envelope me-2" /> Email Address
+                    </Form.Label>
                     <Form.Control
                       type="email"
                       name="email"
                       value={formData.email}
                       onChange={handleChange}
                       placeholder="Enter your email"
-                      required
-                      disabled={loading}
+                      isInvalid={!!errors.email}
+                      disabled={authStatus === 'loading'}
                     />
+                    <Form.Control.Feedback type="invalid">
+                      {errors.email}
+                    </Form.Control.Feedback>
                   </Form.Group>
 
                   <Form.Group className="mb-4">
@@ -98,9 +151,12 @@ useEffect(() => {
                       value={formData.password}
                       onChange={handleChange}
                       placeholder="Enter your password"
-                      required
-                      disabled={loading}
+                      isInvalid={!!errors.password}
+                      disabled={authStatus === 'loading'}
                     />
+                    <Form.Control.Feedback type="invalid">
+                      {errors.password}
+                    </Form.Control.Feedback>
                   </Form.Group>
 
                   <Button 
@@ -108,11 +164,11 @@ useEffect(() => {
                     variant="primary" 
                     size="lg" 
                     className="w-100 mb-3"
-                    disabled={loading}
+                    disabled={authStatus === 'loading'}
                   >
-                    {loading ? (
+                    {authStatus === 'loading' ? (
                       <>
-                        <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                        <Spinner animation="border" size="sm" className="me-2" />
                         Signing In...
                       </>
                     ) : (
@@ -140,8 +196,8 @@ useEffect(() => {
                     <Button
                       variant="outline-danger"
                       className="social-btn"
-                      onClick={() => window.location.href = 'http://localhost:8000/api/auth/social/google/redirect'}
-                      disabled={loading}
+                      onClick={() => handleSocialAuth('google')}
+                      disabled={authStatus === 'loading'}
                     >
                       <i className="fab fa-google me-2"></i>
                       Continue with Google
@@ -149,8 +205,8 @@ useEffect(() => {
                     <Button
                       variant="outline-primary"
                       className="social-btn"
-                      onClick={() => window.location.href = 'http://localhost:8000/api/auth/social/facebook/redirect'}
-                      disabled={loading}
+                      onClick={() => handleSocialAuth('facebook')}
+                      disabled={authStatus === 'loading'}
                     >
                       <i className="fab fa-facebook-f me-2"></i>
                       Continue with Facebook

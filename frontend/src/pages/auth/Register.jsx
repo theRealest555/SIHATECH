@@ -1,11 +1,20 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Container, Row, Col, Card, Form, Button, Alert, ButtonGroup } from 'react-bootstrap';
-import axios from 'axios';
-import ApiService from '../../services/api';
+import { Container, Row, Col, Card, Form, Button, Alert, ButtonGroup, Spinner } from 'react-bootstrap';
+import { useDispatch, useSelector } from 'react-redux';
+import { register, selectAuthStatus, selectAuthError } from '../../redux/slices/authSlice';
+import { fetchDoctorSpecialities, selectDoctorSpecialities } from '../../redux/slices/doctorSlice';
+import { registerSchema } from '../../utils/validation';
+import { initializeCSRF } from '../../api/axios';
+import { toast } from 'react-toastify';
 
 const Register = () => {
   const navigate = useNavigate();
+  const dispatch = useDispatch();
+  const authStatus = useSelector(selectAuthStatus);
+  const authError = useSelector(selectAuthError);
+  const specialities = useSelector(selectDoctorSpecialities);
+  
   const [userType, setUserType] = useState('patient');
   const [formData, setFormData] = useState({
     nom: '',
@@ -17,80 +26,84 @@ const Register = () => {
     role: 'patient',
     speciality_id: '',
   });
-  const [specialities, setSpecialities] = useState([]);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState({});
 
   useEffect(() => {
-    // Fetch specialities when component mounts
-    const fetchSpecialities = async () => {
-      try {
-        const response = await ApiService.getSpecialities();
-        // Transform speciality names to objects with IDs (you may need to adjust based on your backend)
-        const specs = response.data.data.map((name, index) => ({
-          id: index + 1, // This is a temporary solution, ideally backend should return IDs
-          nom: name
-        }));
-        setSpecialities(specs);
-      } catch (err) {
-        console.error('Failed to fetch specialities:', err);
-      }
-    };
-    fetchSpecialities();
-  }, []);
+    // Initialize CSRF token
+    initializeCSRF();
+    
+    // Fetch specialities for doctor registration
+    dispatch(fetchDoctorSpecialities());
+  }, [dispatch]);
 
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setFormData({ ...formData, [name]: value });
+    
+    // Clear field-specific error when user types
+    if (errors[name]) {
+      setErrors({ ...errors, [name]: null });
+    }
   };
 
   const handleUserTypeChange = (type) => {
     setUserType(type);
     setFormData({ ...formData, role: type, speciality_id: '' });
+    
+    // Clear speciality error if switching from doctor
+    if (type !== 'medecin' && errors.speciality_id) {
+      setErrors({ ...errors, speciality_id: null });
+    }
+  };
+
+  const validateForm = async () => {
+    try {
+      await registerSchema.validate(formData, { abortEarly: false });
+      return true;
+    } catch (validationError) {
+      const newErrors = {};
+      validationError.inner.forEach((error) => {
+        newErrors[error.path] = error.message;
+      });
+      setErrors(newErrors);
+      return false;
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    setError(null);
+    
+    // Clear previous errors
+    setErrors({});
+    
+    // Validate form
+    const isValid = await validateForm();
+    if (!isValid) return;
 
-    // Validation
-    if (formData.password !== formData.password_confirmation) {
-      setError('Passwords do not match');
-      setLoading(false);
-      return;
-    }
-
-    if (userType === 'medecin' && !formData.speciality_id) {
-      setError('Please select a medical speciality');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const response = await axios.post('http://localhost:8000/api/register', formData);
-      if (response.data.token) {
-        localStorage.setItem('token', response.data.token);
-        localStorage.setItem('user', JSON.stringify(response.data.user));
-        
+    // Dispatch register action
+    dispatch(register(formData))
+      .unwrap()
+      .then((result) => {
         // Check if email verification is required
-        if (response.data.message && response.data.message.includes('verify')) {
+        if (result.message && result.message.includes('verify')) {
           navigate('/verify-email');
         } else {
           navigate('/dashboard');
         }
-      }
-    } catch (err) {
-      if (err.response?.data?.errors) {
-        // Handle validation errors
-        const errors = err.response.data.errors;
-        const errorMessages = Object.values(errors).flat().join(' ');
-        setError(errorMessages);
-      } else {
-        setError(err.response?.data?.message || 'Registration failed. Please try again.');
-      }
-    } finally {
-      setLoading(false);
-    }
+      })
+      .catch((error) => {
+        // Handle specific validation errors from backend
+        if (error.errors) {
+          const newErrors = {};
+          Object.entries(error.errors).forEach(([key, messages]) => {
+            newErrors[key] = messages[0];
+          });
+          setErrors(newErrors);
+        }
+        
+        // Show error toast
+        toast.error(error.message || 'Registration failed');
+      });
   };
 
   const handleSocialAuth = (provider) => {
@@ -112,10 +125,10 @@ const Register = () => {
                   <p className="text-muted">Join our healthcare platform</p>
                 </div>
 
-                {error && (
+                {authError && (
                   <Alert variant="danger" className="fade-in">
                     <i className="fas fa-exclamation-triangle me-2"></i>
-                    {error}
+                    {authError}
                   </Alert>
                 )}
 
@@ -127,6 +140,7 @@ const Register = () => {
                       variant={userType === 'patient' ? 'primary' : 'outline-primary'}
                       onClick={() => handleUserTypeChange('patient')}
                       className="d-flex align-items-center justify-content-center"
+                      disabled={authStatus === 'loading'}
                     >
                       <i className="fas fa-user me-2"></i>
                       Patient
@@ -135,6 +149,7 @@ const Register = () => {
                       variant={userType === 'medecin' ? 'primary' : 'outline-primary'}
                       onClick={() => handleUserTypeChange('medecin')}
                       className="d-flex align-items-center justify-content-center"
+                      disabled={authStatus === 'loading'}
                     >
                       <i className="fas fa-user-md me-2"></i>
                       Doctor
@@ -142,7 +157,7 @@ const Register = () => {
                   </ButtonGroup>
                 </div>
 
-                <Form onSubmit={handleSubmit}>
+                <Form onSubmit={handleSubmit} noValidate>
                   <Row>
                     <Col md={6}>
                       <Form.Group className="mb-3">
@@ -156,9 +171,12 @@ const Register = () => {
                           value={formData.prenom}
                           onChange={handleChange}
                           placeholder="Enter your first name"
-                          required
-                          disabled={loading}
+                          isInvalid={!!errors.prenom}
+                          disabled={authStatus === 'loading'}
                         />
+                        <Form.Control.Feedback type="invalid">
+                          {errors.prenom}
+                        </Form.Control.Feedback>
                       </Form.Group>
                     </Col>
                     <Col md={6}>
@@ -173,9 +191,12 @@ const Register = () => {
                           value={formData.nom}
                           onChange={handleChange}
                           placeholder="Enter your last name"
-                          required
-                          disabled={loading}
+                          isInvalid={!!errors.nom}
+                          disabled={authStatus === 'loading'}
                         />
+                        <Form.Control.Feedback type="invalid">
+                          {errors.nom}
+                        </Form.Control.Feedback>
                       </Form.Group>
                     </Col>
                   </Row>
@@ -191,9 +212,12 @@ const Register = () => {
                       value={formData.email}
                       onChange={handleChange}
                       placeholder="Enter your email address"
-                      required
-                      disabled={loading}
+                      isInvalid={!!errors.email}
+                      disabled={authStatus === 'loading'}
                     />
+                    <Form.Control.Feedback type="invalid">
+                      {errors.email}
+                    </Form.Control.Feedback>
                   </Form.Group>
 
                   <Row>
@@ -209,13 +233,15 @@ const Register = () => {
                           value={formData.password}
                           onChange={handleChange}
                           placeholder="Create a password"
-                          minLength="8"
-                          required
-                          disabled={loading}
+                          isInvalid={!!errors.password}
+                          disabled={authStatus === 'loading'}
                         />
                         <Form.Text className="text-muted">
                           Minimum 8 characters
                         </Form.Text>
+                        <Form.Control.Feedback type="invalid">
+                          {errors.password}
+                        </Form.Control.Feedback>
                       </Form.Group>
                     </Col>
                     <Col md={6}>
@@ -230,9 +256,12 @@ const Register = () => {
                           value={formData.password_confirmation}
                           onChange={handleChange}
                           placeholder="Confirm your password"
-                          required
-                          disabled={loading}
+                          isInvalid={!!errors.password_confirmation}
+                          disabled={authStatus === 'loading'}
                         />
+                        <Form.Control.Feedback type="invalid">
+                          {errors.password_confirmation}
+                        </Form.Control.Feedback>
                       </Form.Group>
                     </Col>
                   </Row>
@@ -248,8 +277,12 @@ const Register = () => {
                       value={formData.telephone}
                       onChange={handleChange}
                       placeholder="Enter your phone number"
-                      disabled={loading}
+                      isInvalid={!!errors.telephone}
+                      disabled={authStatus === 'loading'}
                     />
+                    <Form.Control.Feedback type="invalid">
+                      {errors.telephone}
+                    </Form.Control.Feedback>
                   </Form.Group>
 
                   {userType === 'medecin' && (
@@ -267,16 +300,19 @@ const Register = () => {
                           name="speciality_id"
                           value={formData.speciality_id}
                           onChange={handleChange}
-                          required
-                          disabled={loading}
+                          isInvalid={!!errors.speciality_id}
+                          disabled={authStatus === 'loading'}
                         >
                           <option value="">Select a speciality...</option>
-                          {specialities.map((spec) => (
-                            <option key={spec.id} value={spec.id}>
-                              {spec.nom}
+                          {specialities.map((spec, index) => (
+                            <option key={index} value={index + 1}>
+                              {spec}
                             </option>
                           ))}
                         </Form.Select>
+                        <Form.Control.Feedback type="invalid">
+                          {errors.speciality_id}
+                        </Form.Control.Feedback>
                       </Form.Group>
                     </div>
                   )}
@@ -286,11 +322,11 @@ const Register = () => {
                     variant="primary" 
                     size="lg" 
                     className="w-100 mb-3"
-                    disabled={loading}
+                    disabled={authStatus === 'loading'}
                   >
-                    {loading ? (
+                    {authStatus === 'loading' ? (
                       <>
-                        <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                        <Spinner animation="border" size="sm" className="me-2" />
                         Creating Account...
                       </>
                     ) : (
@@ -319,7 +355,7 @@ const Register = () => {
                       variant="outline-danger"
                       className="social-btn"
                       onClick={() => handleSocialAuth('google')}
-                      disabled={loading}
+                      disabled={authStatus === 'loading'}
                     >
                       <i className="fab fa-google me-2"></i>
                       Continue with Google
@@ -328,7 +364,7 @@ const Register = () => {
                       variant="outline-primary"
                       className="social-btn"
                       onClick={() => handleSocialAuth('facebook')}
-                      disabled={loading}
+                      disabled={authStatus === 'loading'}
                     >
                       <i className="fab fa-facebook-f me-2"></i>
                       Continue with Facebook

@@ -1,221 +1,264 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Container, Row, Col, Card, Form, Button, Alert, Badge, Tabs, Tab, Modal, Spinner } from 'react-bootstrap';
-import ApiService from '../../services/api';
-import axios from 'axios';
+import { useDispatch, useSelector } from 'react-redux';
+import { 
+  fetchUserProfile, 
+  updateUserProfile, 
+  updateUserPassword,
+  uploadUserPhoto,
+  selectUserProfile,
+  selectUserStatus,
+  selectUserError
+} from '../../redux/slices/userSlice';
+import { 
+  fetchDoctorSpecialities, 
+  fetchDoctorDocuments, 
+  uploadDoctorDocument,
+  selectDoctorSpecialities, 
+  selectDoctorDocuments,
+  selectDoctorStatus
+} from '../../redux/slices/doctorSlice';
+import { selectCurrentUser } from '../../redux/slices/authSlice';
+import { doctorProfileSchema, passwordUpdateSchema } from '../../utils/validation';
+import { toast } from 'react-toastify';
 
 const DoctorProfile = () => {
   const navigate = useNavigate();
-  const [profile, setProfile] = useState({
-    user: {
-      nom: '',
-      prenom: '',
-      email: '',
-      telephone: '',
-      adresse: '',
-      sexe: '',
-      date_de_naissance: '',
-      photo: null,
-    },
-    doctor: {
-      speciality_id: '',
-      description: '',
-      horaires: {},
-      is_verified: false,
-      documents: []
-    }
+  const dispatch = useDispatch();
+  
+  const user = useSelector(selectCurrentUser);
+  const profile = useSelector(selectUserProfile);
+  const userStatus = useSelector(selectUserStatus);
+  const userError = useSelector(selectUserError);
+  const specialities = useSelector(selectDoctorSpecialities);
+  const documents = useSelector(selectDoctorDocuments);
+  const doctorStatus = useSelector(selectDoctorStatus);
+
+  const [formData, setFormData] = useState({
+    nom: '',
+    prenom: '',
+    email: '',
+    telephone: '',
+    adresse: '',
+    sexe: '',
+    date_de_naissance: '',
+    speciality_id: '',
+    description: '',
+    horaires: {}
   });
-  const [specialities, setSpecialities] = useState([]);
+  
   const [isEditing, setIsEditing] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(false);
+  const [errors, setErrors] = useState({});
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordData, setPasswordData] = useState({
     current_password: '',
     password: '',
     password_confirmation: ''
   });
+  const [passwordErrors, setPasswordErrors] = useState({});
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [photoFile, setPhotoFile] = useState(null);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   useEffect(() => {
-    fetchProfile();
-    fetchSpecialities();
-  }, []);
+    // Load profile data
+    dispatch(fetchUserProfile());
+    
+    // Load specialities and documents
+    dispatch(fetchDoctorSpecialities());
+    dispatch(fetchDoctorDocuments());
+  }, [dispatch]);
 
-  const fetchProfile = async () => {
-    try {
-      setLoading(true);
-      const response = await axios.get('http://localhost:8000/api/doctor/profile', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+  // Initialize form when profile is loaded
+  useEffect(() => {
+    if (profile) {
+      setFormData({
+        nom: profile.user?.nom || '',
+        prenom: profile.user?.prenom || '',
+        email: profile.user?.email || '',
+        telephone: profile.user?.telephone || '',
+        adresse: profile.user?.adresse || '',
+        sexe: profile.user?.sexe || '',
+        date_de_naissance: profile.user?.date_de_naissance || '',
+        speciality_id: profile.doctor?.speciality_id || '',
+        description: profile.doctor?.description || '',
+        horaires: profile.doctor?.horaires || {}
       });
-      
-      setProfile({
-        user: response.data.user,
-        doctor: response.data.doctor || {}
-      });
-    } catch (err) {
-      console.error('Error fetching profile:', err);
-      setError('Failed to load profile data');
-      if (err.response?.status === 401) {
-        navigate('/login');
-      }
-    } finally {
-      setLoading(false);
     }
-  };
-
-  const fetchSpecialities = async () => {
-    try {
-      const response = await ApiService.getSpecialities();
-      const specs = response.data.data.map((name, index) => ({
-        id: index + 1,
-        nom: name
-      }));
-      setSpecialities(specs);
-    } catch (err) {
-      console.error('Failed to fetch specialities:', err);
-    }
-  };
+  }, [profile]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    if (name.startsWith('doctor.')) {
-      const field = name.replace('doctor.', '');
-      setProfile(prev => ({
-        ...prev,
-        doctor: { ...prev.doctor, [field]: value }
-      }));
-    } else {
-      setProfile(prev => ({
-        ...prev,
-        user: { ...prev.user, [name]: value }
-      }));
+    setFormData({ ...formData, [name]: value });
+    
+    // Clear field-specific error when user types
+    if (errors[name]) {
+      setErrors({ ...errors, [name]: null });
+    }
+  };
+
+  const handlePasswordChange = (e) => {
+    const { name, value } = e.target;
+    setPasswordData({ ...passwordData, [name]: value });
+    
+    // Clear field-specific error when user types
+    if (passwordErrors[name]) {
+      setPasswordErrors({ ...passwordErrors, [name]: null });
+    }
+  };
+
+  const validateForm = async () => {
+    try {
+      await doctorProfileSchema.validate(formData, { abortEarly: false });
+      return true;
+    } catch (validationError) {
+      const newErrors = {};
+      validationError.inner.forEach((error) => {
+        newErrors[error.path] = error.message;
+      });
+      setErrors(newErrors);
+      return false;
+    }
+  };
+
+  const validatePasswordForm = async () => {
+    try {
+      await passwordUpdateSchema.validate(passwordData, { abortEarly: false });
+      return true;
+    } catch (validationError) {
+      const newErrors = {};
+      validationError.inner.forEach((error) => {
+        newErrors[error.path] = error.message;
+      });
+      setPasswordErrors(newErrors);
+      return false;
     }
   };
 
   const handleEdit = () => {
     setIsEditing(true);
-    setError(null);
-    setSuccess(false);
+    setErrors({});
   };
 
   const handleCancel = () => {
-    fetchProfile();
+    // Reset form to profile data
+    if (profile) {
+      setFormData({
+        nom: profile.user?.nom || '',
+        prenom: profile.user?.prenom || '',
+        email: profile.user?.email || '',
+        telephone: profile.user?.telephone || '',
+        adresse: profile.user?.adresse || '',
+        sexe: profile.user?.sexe || '',
+        date_de_naissance: profile.user?.date_de_naissance || '',
+        speciality_id: profile.doctor?.speciality_id || '',
+        description: profile.doctor?.description || '',
+        horaires: profile.doctor?.horaires || {}
+      });
+    }
     setIsEditing(false);
-    setError(null);
+    setErrors({});
   };
 
   const handleSave = async (e) => {
     e.preventDefault();
-    setSaving(true);
-    setError(null);
+    
+    // Validate form
+    const isValid = await validateForm();
+    if (!isValid) return;
 
-    try {
-      const updateData = {
-        nom: profile.user.nom,
-        prenom: profile.user.prenom,
-        email: profile.user.email,
-        telephone: profile.user.telephone,
-        adresse: profile.user.adresse,
-        sexe: profile.user.sexe,
-        date_de_naissance: profile.user.date_de_naissance,
-        description: profile.doctor.description,
-        speciality_id: profile.doctor.speciality_id,
-        horaires: profile.doctor.horaires
-      };
-
-      await axios.put('http://localhost:8000/api/doctor/profile', updateData, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+    // Update profile
+    dispatch(updateUserProfile(formData))
+      .unwrap()
+      .then(() => {
+        setIsEditing(false);
+        toast.success('Profile updated successfully!');
+      })
+      .catch((error) => {
+        // Handle validation errors from backend
+        if (error.errors) {
+          const newErrors = {};
+          Object.entries(error.errors).forEach(([key, messages]) => {
+            newErrors[key] = messages[0];
+          });
+          setErrors(newErrors);
+        }
+        
+        toast.error(error.message || 'Failed to update profile');
       });
-      
-      setIsEditing(false);
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
-      fetchProfile();
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to update profile');
-    } finally {
-      setSaving(false);
-    }
   };
 
   const handlePasswordUpdate = async (e) => {
     e.preventDefault();
-    setError(null);
     
-    if (passwordData.password !== passwordData.password_confirmation) {
-      setError('Passwords do not match');
-      return;
-    }
+    // Validate password form
+    const isValid = await validatePasswordForm();
+    if (!isValid) return;
 
-    try {
-      await axios.put('http://localhost:8000/api/doctor/profile/password', passwordData, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+    // Update password
+    dispatch(updateUserPassword(passwordData))
+      .unwrap()
+      .then(() => {
+        setShowPasswordModal(false);
+        setPasswordData({
+          current_password: '',
+          password: '',
+          password_confirmation: ''
+        });
+        toast.success('Password updated successfully!');
+      })
+      .catch((error) => {
+        // Handle validation errors from backend
+        if (error.errors) {
+          const newErrors = {};
+          Object.entries(error.errors).forEach(([key, messages]) => {
+            newErrors[key] = messages[0];
+          });
+          setPasswordErrors(newErrors);
+        } else {
+          setPasswordErrors({
+            current_password: error.message || 'Failed to update password'
+          });
+        }
+        
+        toast.error(error.message || 'Failed to update password');
       });
-      
-      setShowPasswordModal(false);
-      setPasswordData({ current_password: '', password: '', password_confirmation: '' });
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to update password');
-    }
   };
 
   const handlePhotoUpload = async (e) => {
     e.preventDefault();
     if (!photoFile) return;
 
-    setUploadingPhoto(true);
-    const formData = new FormData();
-    formData.append('photo', photoFile);
-
-    try {
-      const response = await axios.post('http://localhost:8000/api/doctor/profile/photo', formData, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'multipart/form-data'
-        }
+    // Upload photo
+    dispatch(uploadUserPhoto(photoFile))
+      .unwrap()
+      .then(() => {
+        setShowPhotoModal(false);
+        setPhotoFile(null);
+        dispatch(fetchUserProfile());
+        toast.success('Photo uploaded successfully!');
+      })
+      .catch((error) => {
+        toast.error(error.message || 'Failed to upload photo');
       });
-      
-      setShowPhotoModal(false);
-      setPhotoFile(null);
-      fetchProfile();
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to upload photo');
-    } finally {
-      setUploadingPhoto(false);
-    }
   };
 
   const handleDocumentUpload = async (file, type) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('type', type);
+    if (!file) return;
 
-    try {
-      await axios.post('http://localhost:8000/api/doctor/documents', formData, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'multipart/form-data'
-        }
+    // Upload document
+    dispatch(uploadDoctorDocument({ file, type }))
+      .unwrap()
+      .then(() => {
+        dispatch(fetchDoctorDocuments());
+        toast.success('Document uploaded successfully!');
+      })
+      .catch((error) => {
+        toast.error(error.message || 'Failed to upload document');
       });
-      
-      fetchProfile();
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to upload document');
-    }
   };
 
-  if (loading) {
+  if (userStatus === 'loading' && !profile) {
     return (
       <Container className="mt-5">
         <div className="text-center">
@@ -237,7 +280,7 @@ const DoctorProfile = () => {
                 <Col md={2} className="text-center">
                   <div className="position-relative d-inline-block">
                     <img
-                      src={profile.user.photo ? `http://localhost:8000/storage/${profile.user.photo}` : 'https://via.placeholder.com/150'}
+                      src={profile?.user?.photo ? `http://localhost:8000/storage/${profile.user.photo}` : 'https://via.placeholder.com/150'}
                       alt="Profile"
                       className="rounded-circle"
                       style={{ width: '120px', height: '120px', objectFit: 'cover' }}
@@ -254,16 +297,16 @@ const DoctorProfile = () => {
                   </div>
                 </Col>
                 <Col md={7}>
-                  <h2 className="mb-1">Dr. {profile.user.prenom} {profile.user.nom}</h2>
+                  <h2 className="mb-1">Dr. {profile?.user?.prenom} {profile?.user?.nom}</h2>
                   <p className="text-muted mb-2">
                     <i className="fas fa-stethoscope me-2"></i>
-                    {specialities.find(s => s.id === profile.doctor.speciality_id)?.nom || 'Not specified'}
+                    {specialities[profile?.doctor?.speciality_id - 1] || 'Not specified'}
                   </p>
                   <div className="d-flex align-items-center">
-                    <Badge bg={profile.doctor.is_verified ? 'success' : 'warning'} className="me-2">
-                      {profile.doctor.is_verified ? 'Verified' : 'Pending Verification'}
+                    <Badge bg={profile?.doctor?.is_verified ? 'success' : 'warning'} className="me-2">
+                      {profile?.doctor?.is_verified ? 'Verified' : 'Pending Verification'}
                     </Badge>
-                    {profile.user.email_verified_at && (
+                    {profile?.user?.email_verified_at && (
                       <Badge bg="info">
                         <i className="fas fa-check-circle me-1"></i>
                         Email Verified
@@ -282,11 +325,7 @@ const DoctorProfile = () => {
                   </Button>
                   <Button
                     variant="outline-secondary"
-                    onClick={() => {
-                      localStorage.removeItem('token');
-                      localStorage.removeItem('user');
-                      navigate('/login');
-                    }}
+                    onClick={() => dispatch(logout())}
                     className="w-100"
                   >
                     <i className="fas fa-sign-out-alt me-2"></i>
@@ -297,11 +336,12 @@ const DoctorProfile = () => {
             </Card.Body>
           </Card>
 
-          {error && <Alert variant="danger" dismissible onClose={() => setError(null)}>{error}</Alert>}
-          {success && <Alert variant="success" dismissible onClose={() => setSuccess(false)}>
-            <i className="fas fa-check-circle me-2"></i>
-            Operation completed successfully!
-          </Alert>}
+          {userError && (
+            <Alert variant="danger" dismissible>
+              <i className="fas fa-exclamation-triangle me-2"></i>
+              {userError}
+            </Alert>
+          )}
 
           {/* Profile Tabs */}
           <Card>
@@ -316,11 +356,14 @@ const DoctorProfile = () => {
                           <Form.Control
                             type="text"
                             name="prenom"
-                            value={profile.user.prenom}
+                            value={formData.prenom}
                             onChange={handleChange}
-                            disabled={!isEditing}
-                            required
+                            disabled={!isEditing || userStatus === 'loading'}
+                            isInvalid={!!errors.prenom}
                           />
+                          <Form.Control.Feedback type="invalid">
+                            {errors.prenom}
+                          </Form.Control.Feedback>
                         </Form.Group>
                       </Col>
                       <Col md={6}>
@@ -329,11 +372,14 @@ const DoctorProfile = () => {
                           <Form.Control
                             type="text"
                             name="nom"
-                            value={profile.user.nom}
+                            value={formData.nom}
                             onChange={handleChange}
-                            disabled={!isEditing}
-                            required
+                            disabled={!isEditing || userStatus === 'loading'}
+                            isInvalid={!!errors.nom}
                           />
+                          <Form.Control.Feedback type="invalid">
+                            {errors.nom}
+                          </Form.Control.Feedback>
                         </Form.Group>
                       </Col>
                     </Row>
@@ -345,11 +391,14 @@ const DoctorProfile = () => {
                           <Form.Control
                             type="email"
                             name="email"
-                            value={profile.user.email}
+                            value={formData.email}
                             onChange={handleChange}
-                            disabled={!isEditing}
-                            required
+                            disabled={!isEditing || userStatus === 'loading'}
+                            isInvalid={!!errors.email}
                           />
+                          <Form.Control.Feedback type="invalid">
+                            {errors.email}
+                          </Form.Control.Feedback>
                         </Form.Group>
                       </Col>
                       <Col md={6}>
@@ -358,10 +407,14 @@ const DoctorProfile = () => {
                           <Form.Control
                             type="tel"
                             name="telephone"
-                            value={profile.user.telephone || ''}
+                            value={formData.telephone}
                             onChange={handleChange}
-                            disabled={!isEditing}
+                            disabled={!isEditing || userStatus === 'loading'}
+                            isInvalid={!!errors.telephone}
                           />
+                          <Form.Control.Feedback type="invalid">
+                            {errors.telephone}
+                          </Form.Control.Feedback>
                         </Form.Group>
                       </Col>
                     </Row>
@@ -372,14 +425,18 @@ const DoctorProfile = () => {
                           <Form.Label>Gender</Form.Label>
                           <Form.Select
                             name="sexe"
-                            value={profile.user.sexe || ''}
+                            value={formData.sexe || ''}
                             onChange={handleChange}
-                            disabled={!isEditing}
+                            disabled={!isEditing || userStatus === 'loading'}
+                            isInvalid={!!errors.sexe}
                           >
                             <option value="">Select...</option>
                             <option value="homme">Male</option>
                             <option value="femme">Female</option>
                           </Form.Select>
+                          <Form.Control.Feedback type="invalid">
+                            {errors.sexe}
+                          </Form.Control.Feedback>
                         </Form.Group>
                       </Col>
                       <Col md={4}>
@@ -388,29 +445,36 @@ const DoctorProfile = () => {
                           <Form.Control
                             type="date"
                             name="date_de_naissance"
-                            value={profile.user.date_de_naissance || ''}
+                            value={formData.date_de_naissance || ''}
                             onChange={handleChange}
-                            disabled={!isEditing}
+                            disabled={!isEditing || userStatus === 'loading'}
+                            isInvalid={!!errors.date_de_naissance}
                           />
+                          <Form.Control.Feedback type="invalid">
+                            {errors.date_de_naissance}
+                          </Form.Control.Feedback>
                         </Form.Group>
                       </Col>
                       <Col md={4}>
                         <Form.Group className="mb-3">
                           <Form.Label>Medical Speciality</Form.Label>
                           <Form.Select
-                            name="doctor.speciality_id"
-                            value={profile.doctor.speciality_id || ''}
+                            name="speciality_id"
+                            value={formData.speciality_id || ''}
                             onChange={handleChange}
-                            disabled={!isEditing}
-                            required
+                            disabled={!isEditing || userStatus === 'loading'}
+                            isInvalid={!!errors.speciality_id}
                           >
                             <option value="">Select...</option>
-                            {specialities.map((spec) => (
-                              <option key={spec.id} value={spec.id}>
-                                {spec.nom}
+                            {specialities.map((spec, index) => (
+                              <option key={index} value={index + 1}>
+                                {spec}
                               </option>
                             ))}
                           </Form.Select>
+                          <Form.Control.Feedback type="invalid">
+                            {errors.speciality_id}
+                          </Form.Control.Feedback>
                         </Form.Group>
                       </Col>
                     </Row>
@@ -421,10 +485,14 @@ const DoctorProfile = () => {
                         as="textarea"
                         rows={2}
                         name="adresse"
-                        value={profile.user.adresse || ''}
+                        value={formData.adresse || ''}
                         onChange={handleChange}
-                        disabled={!isEditing}
+                        disabled={!isEditing || userStatus === 'loading'}
+                        isInvalid={!!errors.adresse}
                       />
+                      <Form.Control.Feedback type="invalid">
+                        {errors.adresse}
+                      </Form.Control.Feedback>
                     </Form.Group>
 
                     <Form.Group className="mb-3">
@@ -432,12 +500,16 @@ const DoctorProfile = () => {
                       <Form.Control
                         as="textarea"
                         rows={3}
-                        name="doctor.description"
-                        value={profile.doctor.description || ''}
+                        name="description"
+                        value={formData.description || ''}
                         onChange={handleChange}
-                        disabled={!isEditing}
+                        disabled={!isEditing || userStatus === 'loading'}
+                        isInvalid={!!errors.description}
                         placeholder="Tell patients about your experience and approach..."
                       />
+                      <Form.Control.Feedback type="invalid">
+                        {errors.description}
+                      </Form.Control.Feedback>
                     </Form.Group>
 
                     <div className="d-flex justify-content-end">
@@ -454,11 +526,20 @@ const DoctorProfile = () => {
                         </>
                       ) : (
                         <>
-                          <Button variant="secondary" className="me-2" onClick={handleCancel} disabled={saving}>
+                          <Button 
+                            variant="secondary" 
+                            className="me-2" 
+                            onClick={handleCancel}
+                            disabled={userStatus === 'loading'}
+                          >
                             Cancel
                           </Button>
-                          <Button type="submit" variant="primary" disabled={saving}>
-                            {saving ? (
+                          <Button 
+                            type="submit" 
+                            variant="primary" 
+                            disabled={userStatus === 'loading'}
+                          >
+                            {userStatus === 'loading' ? (
                               <>
                                 <Spinner animation="border" size="sm" className="me-2" />
                                 Saving...
@@ -492,6 +573,7 @@ const DoctorProfile = () => {
                                 size="sm"
                                 onChange={(e) => e.target.files[0] && handleDocumentUpload(e.target.files[0], type)}
                                 accept=".pdf,.jpg,.jpeg,.png"
+                                disabled={doctorStatus === 'loading'}
                               />
                             </Card.Body>
                           </Card>
@@ -501,7 +583,7 @@ const DoctorProfile = () => {
                   </div>
 
                   <h5>Uploaded Documents</h5>
-                  {profile.doctor.documents && profile.doctor.documents.length > 0 ? (
+                  {documents && documents.length > 0 ? (
                     <div className="table-responsive">
                       <table className="table">
                         <thead>
@@ -513,7 +595,7 @@ const DoctorProfile = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {profile.doctor.documents.map(doc => (
+                          {documents.map(doc => (
                             <tr key={doc.id}>
                               <td>{doc.type}</td>
                               <td>{doc.original_name}</td>
@@ -571,7 +653,7 @@ const DoctorProfile = () => {
                           <i className="fas fa-list fa-3x text-success mb-3"></i>
                           <h5>View Appointments</h5>
                           <p className="text-muted">Check your appointments</p>
-                          <Button variant="outline-success" onClick={() => navigate(`/doctor/${profile.user.id}/appointments`)}>
+                          <Button variant="outline-success" onClick={() => navigate(`/doctor/${user?.id}/appointments`)}>
                             View Appointments
                           </Button>
                         </Card.Body>
@@ -596,37 +678,59 @@ const DoctorProfile = () => {
               <Form.Label>Current Password</Form.Label>
               <Form.Control
                 type="password"
+                name="current_password"
                 value={passwordData.current_password}
-                onChange={(e) => setPasswordData({...passwordData, current_password: e.target.value})}
-                required
+                onChange={handlePasswordChange}
+                isInvalid={!!passwordErrors.current_password}
               />
+              <Form.Control.Feedback type="invalid">
+                {passwordErrors.current_password}
+              </Form.Control.Feedback>
             </Form.Group>
             <Form.Group className="mb-3">
               <Form.Label>New Password</Form.Label>
               <Form.Control
                 type="password"
+                name="password"
                 value={passwordData.password}
-                onChange={(e) => setPasswordData({...passwordData, password: e.target.value})}
-                minLength="8"
-                required
+                onChange={handlePasswordChange}
+                isInvalid={!!passwordErrors.password}
               />
+              <Form.Control.Feedback type="invalid">
+                {passwordErrors.password}
+              </Form.Control.Feedback>
             </Form.Group>
             <Form.Group className="mb-3">
               <Form.Label>Confirm New Password</Form.Label>
               <Form.Control
                 type="password"
+                name="password_confirmation"
                 value={passwordData.password_confirmation}
-                onChange={(e) => setPasswordData({...passwordData, password_confirmation: e.target.value})}
-                required
+                onChange={handlePasswordChange}
+                isInvalid={!!passwordErrors.password_confirmation}
               />
+              <Form.Control.Feedback type="invalid">
+                {passwordErrors.password_confirmation}
+              </Form.Control.Feedback>
             </Form.Group>
           </Modal.Body>
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setShowPasswordModal(false)}>
               Cancel
             </Button>
-            <Button variant="primary" type="submit">
-              Update Password
+            <Button 
+              variant="primary" 
+              type="submit"
+              disabled={userStatus === 'loading'}
+            >
+              {userStatus === 'loading' ? (
+                <>
+                  <Spinner animation="border" size="sm" className="me-2" />
+                  Updating...
+                </>
+              ) : (
+                'Update Password'
+              )}
             </Button>
           </Modal.Footer>
         </Form>
@@ -656,8 +760,12 @@ const DoctorProfile = () => {
             <Button variant="secondary" onClick={() => setShowPhotoModal(false)}>
               Cancel
             </Button>
-            <Button variant="primary" type="submit" disabled={!photoFile || uploadingPhoto}>
-              {uploadingPhoto ? (
+            <Button 
+              variant="primary" 
+              type="submit" 
+              disabled={!photoFile || userStatus === 'loading'}
+            >
+              {userStatus === 'loading' ? (
                 <>
                   <Spinner animation="border" size="sm" className="me-2" />
                   Uploading...
