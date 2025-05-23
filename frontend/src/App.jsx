@@ -6,6 +6,7 @@ import Register from './pages/auth/Register';
 import Login from './pages/auth/Login';
 import AdminLogin from './pages/auth/AdminLogin';
 import VerifyEmail from './pages/auth/VerifyEmail';
+import DoctorCompleteProfile from './pages/auth/DoctorCompleteProfile';
 import PatientProfile from './pages/patient/Profile';
 import DoctorProfile from './pages/doctor/Profile';
 import DoctorCalendar from './components/DoctorCalendar';
@@ -15,6 +16,7 @@ import LeaveForm from './components/LeaveForm';
 import PatientAppointments from './components/PatientAppointments';
 import Dashboard from './pages/Dashboard';
 import ProtectedRoute from './components/ProtectedRoute';
+import ApiDiagnostic from './pages/auth/ApiDiagnostic';
 
 const App = () => {
   return (
@@ -28,6 +30,13 @@ const App = () => {
           <Route path="/login" element={<Login />} />
           <Route path="/admin/login" element={<AdminLogin />} />
           <Route path="/verify-email" element={<VerifyEmail />} />
+
+          {/* Doctor Profile Completion Route (requires authentication but not verification) */}
+          <Route path="/doctor/complete-profile" element={
+            <ProtectedRoute allowedRoles={['medecin']} requireVerification={false}>
+              <DoctorCompleteProfile />
+            </ProtectedRoute>
+          } />
 
           {/* Protected Routes */}
           <Route path="/dashboard" element={
@@ -89,6 +98,7 @@ const App = () => {
           
           {/* Catch all route */}
           <Route path="*" element={<Navigate to="/dashboard" />} />
+          <Route path="/api-diagnostic" element={<ApiDiagnostic />} />
         </Routes>
       </main>
     </div>

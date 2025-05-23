@@ -1,55 +1,106 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Container, Row, Col, Card, Form, Button, Alert, Badge, Modal, Spinner, Table } from 'react-bootstrap';
 import ApiService from '../../services/api';
+import axios from 'axios';
 import moment from 'moment';
 
 const PatientProfile = () => {
   const navigate = useNavigate();
   const [profile, setProfile] = useState({
-    nom: '',
-    prenom: '',
-    email: '',
-    telephone: '',
-    date_naissance: '',
-    adresse: '',
+    user: {
+      nom: '',
+      prenom: '',
+      email: '',
+      telephone: '',
+      adresse: '',
+      sexe: '',
+      date_de_naissance: '',
+      photo: null,
+    },
+    patient: {
+      medecin_favori_id: null,
+      medecinFavori: null
+    }
   });
   const [appointments, setAppointments] = useState([]);
+  const [doctors, setDoctors] = useState([]);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordData, setPasswordData] = useState({
+    current_password: '',
+    password: '',
+    password_confirmation: ''
+  });
+  const [showPhotoModal, setShowPhotoModal] = useState(false);
+  const [photoFile, setPhotoFile] = useState(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   useEffect(() => {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-    if (user && user.role === 'patient') {
-      setProfile({
-        nom: user.nom || '',
-        prenom: user.prenom || '',
-        email: user.email || '',
-        telephone: user.telephone || '',
-        date_naissance: user.date_naissance || '',
-        adresse: user.adresse || '',
-      });
-      fetchAppointments();
-    } else {
-      navigate('/login');
-    }
-    setLoading(false);
-  }, [navigate]);
+    fetchProfile();
+    fetchDoctors();
+  }, []);
 
-  const fetchAppointments = async () => {
+  const fetchProfile = async () => {
     try {
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
-      const response = await ApiService.getPatientAppointments(user.id || 1);
+      setLoading(true);
+      const response = await axios.get('http://localhost:8000/api/patient/profile', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      
+      setProfile({
+        user: response.data.user,
+        patient: response.data.patient || {}
+      });
+      
+      // Fetch appointments
+      fetchAppointments(response.data.user.id);
+    } catch (err) {
+      console.error('Error fetching profile:', err);
+      setError('Failed to load profile data');
+      if (err.response?.status === 401) {
+        navigate('/login');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchAppointments = async (userId) => {
+    try {
+      const response = await ApiService.getPatientAppointments(userId);
       setAppointments(response.data.data || []);
     } catch (err) {
       console.error('Error fetching appointments:', err);
     }
   };
 
+  const fetchDoctors = async () => {
+    try {
+      const response = await ApiService.getDoctors();
+      setDoctors(response.data.data || []);
+    } catch (err) {
+      console.error('Error fetching doctors:', err);
+    }
+  };
+
   const handleChange = (e) => {
-    setProfile({ ...profile, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    if (name === 'medecin_favori_id') {
+      setProfile(prev => ({
+        ...prev,
+        patient: { ...prev.patient, medecin_favori_id: value }
+      }));
+    } else {
+      setProfile(prev => ({
+        ...prev,
+        user: { ...prev.user, [name]: value }
+      }));
+    }
   };
 
   const handleEdit = () => {
@@ -59,15 +110,7 @@ const PatientProfile = () => {
   };
 
   const handleCancel = () => {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-    setProfile({
-      nom: user.nom || '',
-      prenom: user.prenom || '',
-      email: user.email || '',
-      telephone: user.telephone || '',
-      date_naissance: user.date_naissance || '',
-      adresse: user.adresse || '',
-    });
+    fetchProfile();
     setIsEditing(false);
     setError(null);
   };
@@ -78,16 +121,25 @@ const PatientProfile = () => {
     setError(null);
 
     try {
-      // You'll need to implement this API endpoint
-      const response = await ApiService.updateProfile(profile);
-      
-      // Update local storage
-      const updatedUser = { ...JSON.parse(localStorage.getItem('user')), ...profile };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
+      const updateData = {
+        nom: profile.user.nom,
+        prenom: profile.user.prenom,
+        email: profile.user.email,
+        telephone: profile.user.telephone,
+        adresse: profile.user.adresse,
+        sexe: profile.user.sexe,
+        date_de_naissance: profile.user.date_de_naissance,
+        medecin_favori_id: profile.patient.medecin_favori_id
+      };
+
+      await axios.put('http://localhost:8000/api/patient/profile', updateData, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
       
       setIsEditing(false);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
+      fetchProfile();
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to update profile');
     } finally {
@@ -95,195 +147,362 @@ const PatientProfile = () => {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    navigate('/login');
+  const handlePasswordUpdate = async (e) => {
+    e.preventDefault();
+    setError(null);
+    
+    if (passwordData.password !== passwordData.password_confirmation) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    try {
+      await axios.put('http://localhost:8000/api/patient/profile/password', passwordData, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      
+      setShowPasswordModal(false);
+      setPasswordData({ current_password: '', password: '', password_confirmation: '' });
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to update password');
+    }
+  };
+
+  const handlePhotoUpload = async (e) => {
+    e.preventDefault();
+    if (!photoFile) return;
+
+    setUploadingPhoto(true);
+    const formData = new FormData();
+    formData.append('photo', photoFile);
+
+    try {
+      const response = await axios.post('http://localhost:8000/api/patient/profile/photo', formData, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      
+      setShowPhotoModal(false);
+      setPhotoFile(null);
+      fetchProfile();
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to upload photo');
+    } finally {
+      setUploadingPhoto(false);
+    }
   };
 
   const getStatusBadgeClass = (status) => {
     switch (status) {
       case 'confirmé':
-        return 'badge bg-success';
+        return 'success';
       case 'en_attente':
-        return 'badge bg-warning';
+        return 'warning';
       case 'annulé':
-        return 'badge bg-danger';
+        return 'danger';
       case 'terminé':
-        return 'badge bg-secondary';
+        return 'secondary';
       default:
-        return 'badge bg-light text-dark';
+        return 'light';
+    }
+  };
+
+  const handleCancelAppointment = async (appointmentId) => {
+    try {
+      await ApiService.updateAppointmentStatus(appointmentId, { statut: 'annulé' });
+      fetchAppointments(profile.user.id);
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
+    } catch (err) {
+      setError('Failed to cancel appointment');
     }
   };
 
   if (loading) {
     return (
-      <div className="container mt-5">
+      <Container className="mt-5">
         <div className="text-center">
-          <div className="spinner-border" role="status">
-            <span className="visually-hidden">Loading...</span>
-          </div>
+          <Spinner animation="border" variant="primary" />
+          <p className="mt-3">Loading profile...</p>
         </div>
-      </div>
+      </Container>
     );
   }
 
   return (
-    <div className="container mt-5">
-      <div className="row">
-        <div className="col-md-8 mx-auto">
-          <div className="card">
-            <div className="card-header d-flex justify-content-between align-items-center">
-              <h3 className="mb-0">Patient Profile</h3>
-              <div>
-                <button
-                  className="btn btn-primary me-2"
-                  onClick={() => navigate('/patient')}
-                >
-                  Find Doctor
-                </button>
-                <button
-                  className="btn btn-outline-secondary"
-                  onClick={handleLogout}
-                >
-                  Logout
-                </button>
-              </div>
-            </div>
-            <div className="card-body">
-              {error && <div className="alert alert-danger">{error}</div>}
-              {success && <div className="alert alert-success">Profile updated successfully!</div>}
-
-              <form onSubmit={handleSave}>
-                <div className="row mb-3">
-                  <div className="col-md-6">
-                    <label className="form-label">First Name</label>
-                    <input
-                      type="text"
-                      name="prenom"
-                      className="form-control"
-                      value={profile.prenom}
-                      onChange={handleChange}
-                      disabled={!isEditing}
-                      required
+    <Container className="py-4">
+      <Row>
+        <Col lg={12}>
+          {/* Profile Header */}
+          <Card className="profile-card mb-4">
+            <Card.Body>
+              <Row className="align-items-center">
+                <Col md={2} className="text-center">
+                  <div className="position-relative d-inline-block">
+                    <img
+                      src={profile.user.photo ? `http://localhost:8000/storage/${profile.user.photo}` : 'https://via.placeholder.com/150'}
+                      alt="Profile"
+                      className="rounded-circle"
+                      style={{ width: '120px', height: '120px', objectFit: 'cover' }}
                     />
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      className="position-absolute bottom-0 end-0 rounded-circle"
+                      onClick={() => setShowPhotoModal(true)}
+                      style={{ width: '35px', height: '35px', padding: 0 }}
+                    >
+                      <i className="fas fa-camera"></i>
+                    </Button>
                   </div>
-                  <div className="col-md-6">
-                    <label className="form-label">Last Name</label>
-                    <input
-                      type="text"
-                      name="nom"
-                      className="form-control"
-                      value={profile.nom}
-                      onChange={handleChange}
-                      disabled={!isEditing}
-                      required
-                    />
-                  </div>
-                </div>
+                </Col>
+                <Col md={7}>
+                  <h2 className="mb-1">{profile.user.prenom} {profile.user.nom}</h2>
+                  <p className="text-muted mb-2">
+                    <i className="fas fa-user me-2"></i>
+                    Patient
+                  </p>
+                  {profile.user.email_verified_at && (
+                    <Badge bg="info">
+                      <i className="fas fa-check-circle me-1"></i>
+                      Email Verified
+                    </Badge>
+                  )}
+                  {profile.patient.medecinFavori && (
+                    <p className="mt-2 mb-0">
+                      <small className="text-muted">
+                        <i className="fas fa-star me-1 text-warning"></i>
+                        Favorite Doctor: Dr. {profile.patient.medecinFavori.user?.prenom} {profile.patient.medecinFavori.user?.nom}
+                      </small>
+                    </p>
+                  )}
+                </Col>
+                <Col md={3} className="text-md-end">
+                  <Button
+                    variant="primary"
+                    onClick={() => navigate('/patient')}
+                    className="mb-2 w-100"
+                  >
+                    <i className="fas fa-search me-2"></i>
+                    Find Doctor
+                  </Button>
+                  <Button
+                    variant="outline-secondary"
+                    onClick={() => {
+                      localStorage.removeItem('token');
+                      localStorage.removeItem('user');
+                      navigate('/login');
+                    }}
+                    className="w-100"
+                  >
+                    <i className="fas fa-sign-out-alt me-2"></i>
+                    Logout
+                  </Button>
+                </Col>
+              </Row>
+            </Card.Body>
+          </Card>
 
-                <div className="mb-3">
-                  <label className="form-label">Email</label>
-                  <input
-                    type="email"
-                    name="email"
-                    className="form-control"
-                    value={profile.email}
-                    onChange={handleChange}
-                    disabled={!isEditing}
-                    required
-                  />
-                </div>
+          {error && <Alert variant="danger" dismissible onClose={() => setError(null)}>{error}</Alert>}
+          {success && <Alert variant="success" dismissible onClose={() => setSuccess(false)}>
+            <i className="fas fa-check-circle me-2"></i>
+            Operation completed successfully!
+          </Alert>}
 
-                <div className="row mb-3">
-                  <div className="col-md-6">
-                    <label className="form-label">Phone Number</label>
-                    <input
-                      type="tel"
-                      name="telephone"
-                      className="form-control"
-                      value={profile.telephone}
-                      onChange={handleChange}
-                      disabled={!isEditing}
-                    />
-                  </div>
-                  <div className="col-md-6">
-                    <label className="form-label">Date of Birth</label>
-                    <input
-                      type="date"
-                      name="date_naissance"
-                      className="form-control"
-                      value={profile.date_naissance}
-                      onChange={handleChange}
-                      disabled={!isEditing}
-                    />
-                  </div>
-                </div>
+          {/* Profile Information */}
+          <Card className="mb-4">
+            <Card.Header>
+              <h5 className="mb-0">
+                <i className="fas fa-user-circle me-2"></i>
+                Personal Information
+              </h5>
+            </Card.Header>
+            <Card.Body>
+              <Form onSubmit={handleSave}>
+                <Row>
+                  <Col md={6}>
+                    <Form.Group className="mb-3">
+                      <Form.Label>First Name</Form.Label>
+                      <Form.Control
+                        type="text"
+                        name="prenom"
+                        value={profile.user.prenom}
+                        onChange={handleChange}
+                        disabled={!isEditing}
+                        required
+                      />
+                    </Form.Group>
+                  </Col>
+                  <Col md={6}>
+                    <Form.Group className="mb-3">
+                      <Form.Label>Last Name</Form.Label>
+                      <Form.Control
+                        type="text"
+                        name="nom"
+                        value={profile.user.nom}
+                        onChange={handleChange}
+                        disabled={!isEditing}
+                        required
+                      />
+                    </Form.Group>
+                  </Col>
+                </Row>
 
-                <div className="mb-3">
-                  <label className="form-label">Address</label>
-                  <textarea
+                <Row>
+                  <Col md={6}>
+                    <Form.Group className="mb-3">
+                      <Form.Label>Email</Form.Label>
+                      <Form.Control
+                        type="email"
+                        name="email"
+                        value={profile.user.email}
+                        onChange={handleChange}
+                        disabled={!isEditing}
+                        required
+                      />
+                    </Form.Group>
+                  </Col>
+                  <Col md={6}>
+                    <Form.Group className="mb-3">
+                      <Form.Label>Phone Number</Form.Label>
+                      <Form.Control
+                        type="tel"
+                        name="telephone"
+                        value={profile.user.telephone || ''}
+                        onChange={handleChange}
+                        disabled={!isEditing}
+                      />
+                    </Form.Group>
+                  </Col>
+                </Row>
+
+                <Row>
+                  <Col md={4}>
+                    <Form.Group className="mb-3">
+                      <Form.Label>Gender</Form.Label>
+                      <Form.Select
+                        name="sexe"
+                        value={profile.user.sexe || ''}
+                        onChange={handleChange}
+                        disabled={!isEditing}
+                      >
+                        <option value="">Select...</option>
+                        <option value="homme">Male</option>
+                        <option value="femme">Female</option>
+                      </Form.Select>
+                    </Form.Group>
+                  </Col>
+                  <Col md={4}>
+                    <Form.Group className="mb-3">
+                      <Form.Label>Date of Birth</Form.Label>
+                      <Form.Control
+                        type="date"
+                        name="date_de_naissance"
+                        value={profile.user.date_de_naissance || ''}
+                        onChange={handleChange}
+                        disabled={!isEditing}
+                      />
+                    </Form.Group>
+                  </Col>
+                  <Col md={4}>
+                    <Form.Group className="mb-3">
+                      <Form.Label>Favorite Doctor</Form.Label>
+                      <Form.Select
+                        name="medecin_favori_id"
+                        value={profile.patient.medecin_favori_id || ''}
+                        onChange={handleChange}
+                        disabled={!isEditing}
+                      >
+                        <option value="">No favorite doctor</option>
+                        {doctors.map((doctor) => (
+                          <option key={doctor.id} value={doctor.id}>
+                            Dr. {doctor.name} - {doctor.speciality}
+                          </option>
+                        ))}
+                      </Form.Select>
+                    </Form.Group>
+                  </Col>
+                </Row>
+
+                <Form.Group className="mb-3">
+                  <Form.Label>Address</Form.Label>
+                  <Form.Control
+                    as="textarea"
+                    rows={2}
                     name="adresse"
-                    className="form-control"
-                    rows="3"
-                    value={profile.adresse}
+                    value={profile.user.adresse || ''}
                     onChange={handleChange}
                     disabled={!isEditing}
-                    placeholder="Enter your full address"
-                  ></textarea>
-                </div>
+                  />
+                </Form.Group>
 
                 <div className="d-flex justify-content-end">
                   {!isEditing ? (
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      onClick={handleEdit}
-                    >
-                      Edit Profile
-                    </button>
+                    <>
+                      <Button variant="secondary" className="me-2" onClick={() => setShowPasswordModal(true)}>
+                        <i className="fas fa-key me-2"></i>
+                        Change Password
+                      </Button>
+                      <Button variant="primary" onClick={handleEdit}>
+                        <i className="fas fa-edit me-2"></i>
+                        Edit Profile
+                      </Button>
+                    </>
                   ) : (
-                    <div>
-                      <button
-                        type="button"
-                        className="btn btn-secondary me-2"
-                        onClick={handleCancel}
-                        disabled={saving}
-                      >
+                    <>
+                      <Button variant="secondary" className="me-2" onClick={handleCancel} disabled={saving}>
                         Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        className="btn btn-primary"
-                        disabled={saving}
-                      >
-                        {saving ? 'Saving...' : 'Save Changes'}
-                      </button>
-                    </div>
+                      </Button>
+                      <Button type="submit" variant="primary" disabled={saving}>
+                        {saving ? (
+                          <>
+                            <Spinner animation="border" size="sm" className="me-2" />
+                            Saving...
+                          </>
+                        ) : (
+                          <>
+                            <i className="fas fa-save me-2"></i>
+                            Save Changes
+                          </>
+                        )}
+                      </Button>
+                    </>
                   )}
                 </div>
-              </form>
-            </div>
-          </div>
+              </Form>
+            </Card.Body>
+          </Card>
 
           {/* Appointments History */}
-          <div className="card mt-4">
-            <div className="card-header d-flex justify-content-between align-items-center">
-              <h5 className="mb-0">My Appointments</h5>
-              <button
-                className="btn btn-sm btn-primary"
+          <Card>
+            <Card.Header className="d-flex justify-content-between align-items-center">
+              <h5 className="mb-0">
+                <i className="fas fa-calendar-check me-2"></i>
+                My Appointments
+              </h5>
+              <Button
+                size="sm"
+                variant="primary"
                 onClick={() => navigate('/patient')}
               >
+                <i className="fas fa-plus me-2"></i>
                 Book New Appointment
-              </button>
-            </div>
-            <div className="card-body">
+              </Button>
+            </Card.Header>
+            <Card.Body>
               {appointments.length > 0 ? (
                 <div className="table-responsive">
-                  <table className="table table-hover">
+                  <Table hover>
                     <thead>
                       <tr>
                         <th>Doctor</th>
+                        <th>Speciality</th>
                         <th>Date & Time</th>
                         <th>Status</th>
                         <th>Actions</th>
@@ -294,49 +513,145 @@ const PatientProfile = () => {
                         <tr key={appointment.id}>
                           <td>
                             <strong>{appointment.doctor_name || 'Dr. N/A'}</strong>
-                            <br />
-                            <small className="text-muted">{appointment.doctor_speciality || 'N/A'}</small>
+                          </td>
+                          <td>
+                            <small className="text-muted">{appointment.speciality || 'N/A'}</small>
                           </td>
                           <td>{moment(appointment.date_heure).format("MMM DD, YYYY HH:mm")}</td>
                           <td>
-                            <span className={getStatusBadgeClass(appointment.statut)}>
+                            <Badge bg={getStatusBadgeClass(appointment.statut)}>
                               {appointment.statut || 'Unknown'}
-                            </span>
+                            </Badge>
                           </td>
                           <td>
                             {appointment.statut === 'en_attente' && (
-                              <button
-                                className="btn btn-sm btn-outline-danger"
-                                onClick={() => {
-                                  // You can implement cancel appointment functionality
-                                  console.log('Cancel appointment:', appointment.id);
-                                }}
+                              <Button
+                                size="sm"
+                                variant="outline-danger"
+                                onClick={() => handleCancelAppointment(appointment.id)}
                               >
+                                <i className="fas fa-times me-1"></i>
                                 Cancel
-                              </button>
+                              </Button>
+                            )}
+                            {appointment.statut === 'confirmé' && (
+                              <Button
+                                size="sm"
+                                variant="outline-warning"
+                                onClick={() => handleCancelAppointment(appointment.id)}
+                              >
+                                <i className="fas fa-times me-1"></i>
+                                Cancel
+                              </Button>
                             )}
                           </td>
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </Table>
                 </div>
               ) : (
                 <div className="text-center py-4">
+                  <i className="fas fa-calendar-alt fa-3x text-muted mb-3"></i>
                   <p className="text-muted mb-3">You don't have any appointments yet.</p>
-                  <button
-                    className="btn btn-primary"
+                  <Button
+                    variant="primary"
                     onClick={() => navigate('/patient')}
                   >
                     Book Your First Appointment
-                  </button>
+                  </Button>
                 </div>
               )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+            </Card.Body>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Password Modal */}
+      <Modal show={showPasswordModal} onHide={() => setShowPasswordModal(false)}>
+        <Modal.Header closeButton>
+          <Modal.Title>Change Password</Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={handlePasswordUpdate}>
+          <Modal.Body>
+            <Form.Group className="mb-3">
+              <Form.Label>Current Password</Form.Label>
+              <Form.Control
+                type="password"
+                value={passwordData.current_password}
+                onChange={(e) => setPasswordData({...passwordData, current_password: e.target.value})}
+                required
+              />
+            </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label>New Password</Form.Label>
+              <Form.Control
+                type="password"
+                value={passwordData.password}
+                onChange={(e) => setPasswordData({...passwordData, password: e.target.value})}
+                minLength="8"
+                required
+              />
+            </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label>Confirm New Password</Form.Label>
+              <Form.Control
+                type="password"
+                value={passwordData.password_confirmation}
+                onChange={(e) => setPasswordData({...passwordData, password_confirmation: e.target.value})}
+                required
+              />
+            </Form.Group>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setShowPasswordModal(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit">
+              Update Password
+            </Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
+
+      {/* Photo Upload Modal */}
+      <Modal show={showPhotoModal} onHide={() => setShowPhotoModal(false)}>
+        <Modal.Header closeButton>
+          <Modal.Title>Update Profile Photo</Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={handlePhotoUpload}>
+          <Modal.Body>
+            <Form.Group>
+              <Form.Label>Choose a new photo</Form.Label>
+              <Form.Control
+                type="file"
+                accept="image/*"
+                onChange={(e) => setPhotoFile(e.target.files[0])}
+                required
+              />
+              <Form.Text className="text-muted">
+                Maximum file size: 5MB. Supported formats: JPG, PNG, GIF
+              </Form.Text>
+            </Form.Group>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setShowPhotoModal(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" disabled={!photoFile || uploadingPhoto}>
+              {uploadingPhoto ? (
+                <>
+                  <Spinner animation="border" size="sm" className="me-2" />
+                  Uploading...
+                </>
+              ) : (
+                'Upload Photo'
+              )}
+            </Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
+    </Container>
   );
 };
 

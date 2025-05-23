@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Container, Row, Col, Card, Form, Button, Alert } from 'react-bootstrap';
 import axios from 'axios';
@@ -11,6 +12,21 @@ const Login = () => {
   });
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+
+useEffect(() => {
+  const handleMessage = (event) => {
+    if (event.data.type === 'SOCIAL_AUTH_SUCCESS') {
+      localStorage.setItem('token', event.data.data.token);
+      localStorage.setItem('user', JSON.stringify(event.data.data.user));
+      navigate('/dashboard');
+    } else if (event.data.type === 'SOCIAL_AUTH_ERROR') {
+      setError(event.data.error);
+    }
+  };
+
+  window.addEventListener('message', handleMessage);
+  return () => window.removeEventListener('message', handleMessage);
+}, []);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -58,9 +74,8 @@ const Login = () => {
                 <Form onSubmit={handleSubmit}>
                   <Form.Group className="mb-3">
                     <Form.Label>
-                      <i className="fas fa-envelope me-2"></i>
-                      Email Address
-                    </Form.Label>
+                                          <i className="fas fa-envelope me-2" />{' '}Email Address
+                                        </Form.Label>
                     <Form.Control
                       type="email"
                       name="email"

@@ -13,127 +13,113 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Laravel\Socialite\Facades\Socialite;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\Log;
 
 class SocialiteAuthController extends Controller
 {
     /**
      * Redirect to social provider
      */
-    public function redirect(Request $request, string $provider): JsonResponse
+    public function redirect(string $provider)
     {
-        // Validate provider
-        if (!in_array($provider, ['google', 'facebook'])) {
-            return response()->json(['message' => 'Unsupported provider'], 400);
+        try {
+            // Validate provider
+            if (!in_array($provider, ['google', 'facebook'])) {
+                return redirect('http://localhost:3000/login?error=unsupported_provider');
+            }
+
+            // Redirect to the social provider
+            return Socialite::driver($provider)->redirect();
+
+        } catch (\Exception $e) {
+            Log::error('Social redirect error: ' . $e->getMessage());
+            return redirect('http://localhost:3000/login?error=redirect_failed');
         }
-        
-        // Validate role
-        $role = $request->input('role', 'patient');
-        if (!in_array($role, ['patient', 'medecin'])) {
-            return response()->json(['message' => 'Invalid role'], 400);
-        }
-        
-        // Generate a state parameter with role information
-        $state = base64_encode(json_encode([
-            'role' => $role,
-            'nonce' => Str::random(40)
-        ]));
-        
-        // Get the redirect URL with state parameter
-        $redirectUrl = Socialite::driver($provider)->redirect()->with(['state' => $state])->getTargetUrl();
-        
-        return response()->json(['redirect_url' => $redirectUrl]);
     }
-    
+
     /**
      * Handle provider callback
      */
-    public function callback(Request $request, string $provider): JsonResponse
+    public function callback(string $provider)
     {
         try {
+            // Validate provider
+            if (!in_array($provider, ['google', 'facebook'])) {
+                return redirect('http://localhost:3000/login?error=unsupported_provider');
+            }
+
             // Get social user data
             $socialUser = Socialite::driver($provider)->user();
-            
-            // Extract role from state parameter
-            $role = 'patient'; // Default
-            if ($request->has('state')) {
-                try {
-                    $stateData = json_decode(base64_decode($request->state), true);
-                    if (isset($stateData['role']) && in_array($stateData['role'], ['patient', 'medecin'])) {
-                        $role = $stateData['role'];
-                    }
-                } catch (\Exception $e) {
-                    // State parsing failed, use default role
+
+            // Find existing user by email first
+            $user = User::where('email', $socialUser->getEmail())->first();
+
+            if ($user) {
+                // Update existing user with provider details if not already set
+                if (!$user->provider_id || !$user->provider) {
+                    $user->update([
+                        'provider' => $provider,
+                        'provider_id' => $socialUser->getId(),
+                        'email_verified_at' => $user->email_verified_at ?? now(),
+                    ]);
                 }
-            }
-            
-            // Find existing user by provider id and provider
-            $user = User::where('provider_id', $socialUser->getId())
-                        ->where('provider', $provider)
-                        ->first();
-            
-            // If user doesn't exist but email exists, link accounts
-            if (!$user && $existingUser = User::where('email', $socialUser->getEmail())->first()) {
-                // Update existing user with provider details
-                $existingUser->update([
-                    'provider' => $provider,
-                    'provider_id' => $socialUser->getId(),
-                ]);
-                $user = $existingUser;
-            }
-            
-            // If no user found, create new user
-            if (!$user) {
-                // Extract name components
+            } else {
+                // Create new user
                 $name = $socialUser->getName();
-                $nameParts = explode(' ', $name);
+                $nameParts = explode(' ', $name, 2);
                 $firstName = $nameParts[0] ?? '';
-                $lastName = count($nameParts) > 1 ? end($nameParts) : '';
-                
+                $lastName = $nameParts[1] ?? '';
+
                 // Create the user
                 $user = User::create([
                     'nom' => $lastName,
                     'prenom' => $firstName,
                     'email' => $socialUser->getEmail(),
                     'password' => Hash::make(Str::random(16)), // Random password
-                    'role' => $role,
+                    'role' => 'patient', // Default to patient
                     'status' => 'actif',
-                    'email_verified_at' => now(), // Email is already verified through social provider
+                    'email_verified_at' => now(), // Email is verified through social provider
                     'provider' => $provider,
                     'provider_id' => $socialUser->getId(),
                     'photo' => $socialUser->getAvatar(),
+                    'telephone' => '', // Will be filled later if needed
                 ]);
-                
-                // Create role-specific profile
-                if ($role === 'patient') {
-                    Patient::create([
-                        'user_id' => $user->id,
-                    ]);
-                } elseif ($role === 'medecin') {
-                    // For doctors, they'll need to complete their profile after registration
-                    Doctor::create([
-                        'user_id' => $user->id,
-                        'is_verified' => false, // Require verification for doctors
-                    ]);
-                }
+
+                // Create patient profile by default
+                Patient::create([
+                    'user_id' => $user->id,
+                    'date_naissance' => null, // To be filled later
+                    'adresse' => '', // To be filled later
+                    'numero_assurance' => '', // To be filled later
+                ]);
             }
-            
-            // Generate token with appropriate ability based on user role
+
+            // Generate token
             $token = $user->createToken('social-auth-token', [$user->role])->plainTextToken;
-            
-            // Return user and token
-            return response()->json([
-                'user' => $user,
+
+            // Prepare user data for frontend
+            $userData = [
+                'id' => $user->id,
+                'nom' => $user->nom,
+                'prenom' => $user->prenom,
+                'email' => $user->email,
                 'role' => $user->role,
+                'photo' => $user->photo,
+                'email_verified_at' => $user->email_verified_at,
+            ];
+
+            // Redirect to frontend with token and user data
+            $frontendUrl = 'http://localhost:3000/auth/callback';
+            $queryParams = http_build_query([
                 'token' => $token,
-                'requires_profile_completion' => $user->role === 'medecin' && 
-                    ($user->doctor && empty($user->doctor->speciality_id)),
+                'user' => json_encode($userData),
+                'provider' => $provider,
             ]);
-            
+
+            return redirect($frontendUrl . '?' . $queryParams);
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Authentication failed',
-                'error' => $e->getMessage()
-            ], 500);
+            Log::error('Social callback error: ' . $e->getMessage());
+            return redirect('http://localhost:3000/login?error=authentication_failed&message=' . urlencode($e->getMessage()));
         }
     }
 }
