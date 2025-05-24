@@ -15,9 +15,10 @@ return new class extends Migration
             $table->id();
             $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
             $table->string('action');
-            $table->morphs('target'); 
+            $table->morphs('target');
+            $table->json('metadata')->nullable(); // Added missing metadata column
             $table->timestamps();
-        });        
+        });
     }
 
     /**

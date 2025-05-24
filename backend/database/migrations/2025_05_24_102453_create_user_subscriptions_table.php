@@ -10,7 +10,8 @@ return new class extends Migration
         Schema::create('user_subscriptions', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained()->onDelete('cascade');
-            $table->foreignId('subscription_plan_id')->constrained()->onDelete('cascade');
+            // Changed to reference 'abonnements' table instead of 'subscription_plans'
+            $table->foreignId('subscription_plan_id')->constrained('abonnements')->onDelete('cascade');
             $table->enum('status', ['active', 'cancelled', 'expired', 'pending']);
             $table->datetime('starts_at');
             $table->datetime('ends_at');

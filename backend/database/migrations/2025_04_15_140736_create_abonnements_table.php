@@ -7,7 +7,8 @@ return new class extends Migration
 {
     public function up()
     {
-        Schema::create('subscription_plans', function (Blueprint $table) {
+        // Changed table name from 'subscription_plans' to 'abonnements' to match model
+        Schema::create('abonnements', function (Blueprint $table) {
             $table->id();
             $table->string('name');
             $table->text('description')->nullable();
@@ -21,6 +22,6 @@ return new class extends Migration
 
     public function down()
     {
-        Schema::dropIfExists('subscription_plans');
+        Schema::dropIfExists('abonnements');
     }
 };

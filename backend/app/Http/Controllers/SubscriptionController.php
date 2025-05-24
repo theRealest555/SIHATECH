@@ -20,24 +20,35 @@ class SubscriptionController extends Controller
         $this->paymentService = $paymentService;
     }
 
+    /**
+     * Get available subscription plans
+     */
     public function getPlans(): JsonResponse
     {
-        // Note: This references subscription_plans table, but your migration shows 'abonnements'
-        // Using Abonnement model for now, but you may need to adjust based on your actual table
+        // Use the Abonnement model with the correct table name
         $plans = Abonnement::where('is_active', true)->get();
+
         return response()->json(['data' => $plans]);
     }
 
+    /**
+     * Subscribe to a plan
+     */
     public function subscribe(Request $request): JsonResponse
     {
         $request->validate([
-            'plan_id' => 'required|exists:subscription_plans,id',
+            'plan_id' => 'required|exists:abonnements,id',
             'payment_method' => 'required|in:cih_pay,paypal,stripe',
             'payment_data' => 'required|array'
         ]);
 
         $user = Auth::user();
+
+        // Get plan from Abonnement model
         $plan = Abonnement::findOrFail($request->plan_id);
+
+        // Calculate end date based on billing cycle
+        $endsAt = $plan->billing_cycle === 'monthly' ? now()->addMonth() : now()->addYear();
 
         // Create subscription
         $subscription = UserSubscription::create([
@@ -45,7 +56,7 @@ class SubscriptionController extends Controller
             'subscription_plan_id' => $plan->id,
             'status' => 'pending',
             'starts_at' => now(),
-            'ends_at' => $plan->billing_cycle === 'monthly' ? now()->addMonth() : now()->addYear(),
+            'ends_at' => $endsAt,
             'payment_method' => $request->payment_data
         ]);
 
@@ -61,18 +72,28 @@ class SubscriptionController extends Controller
 
         if ($paymentResult['success']) {
             $subscription->update(['status' => 'active']);
+
+            // Load the subscription with plan data
+            $subscription->load('subscriptionPlan');
+
             return response()->json([
                 'message' => 'Abonnement créé avec succès',
-                'subscription' => $subscription->load('subscriptionPlan'),
+                'subscription' => $subscription,
                 'payment' => $paymentResult['payment']
             ]);
         }
+
+        $subscription->update(['status' => 'cancelled']);
 
         return response()->json([
             'message' => 'Échec du paiement',
             'error' => $paymentResult['error']
         ], 400);
     }
+
+    /**
+     * Cancel user subscription
+     */
     public function cancelSubscription(): JsonResponse
     {
         $user = Auth::user();
@@ -91,6 +112,10 @@ class SubscriptionController extends Controller
 
         return response()->json(['message' => 'Abonnement annulé avec succès']);
     }
+
+    /**
+     * Get user's current subscription
+     */
     public function getUserSubscription(): JsonResponse
     {
         $user = Auth::user();

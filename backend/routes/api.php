@@ -18,7 +18,6 @@ use App\Http\Controllers\Admin\AdminController;
 use App\Http\Controllers\Admin\DoctorVerificationController;
 use App\Http\Controllers\Api\AppointmentController;
 use App\Http\Controllers\Api\AvailabilityController;
-use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\DoctorController;
 use App\Http\Controllers\SubscriptionController;
 use App\Http\Controllers\ReportController;
@@ -27,11 +26,6 @@ use App\Http\Controllers\ReportController;
 |--------------------------------------------------------------------------
 | API Routes
 |--------------------------------------------------------------------------
-|
-| Here is where you can register API routes for your application. These
-| routes are loaded by the RouteServiceProvider and all of them will
-| be assigned to the "api" middleware group. Make something great!
-|
 */
 
 // Guest Routes (No Authentication Required)
@@ -168,7 +162,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::get('/appointments', [AppointmentController::class, 'getAppointments'])->name('api.doctor.appointments.index');
             Route::patch('/appointments/{id}/status', [AppointmentController::class, 'updateStatus'])->name('api.doctor.appointments.update-status');
 
-            // Availability Management (for all doctors, verification check inside controller)
+            // Availability Management (for all doctors)
             Route::get('/availability', function(Request $request) {
                 $doctor = $request->user()->doctor;
                 return app(AvailabilityController::class)->getAvailability($request, $doctor);
