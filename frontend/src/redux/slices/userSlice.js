@@ -1,7 +1,14 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import axios from '../../api/axios';
+import { API_URLS } from '../../constants/apiUrls';
 
-// Async thunks for user data
+/**
+ * Fetch the current user's profile
+ * Routes: 
+ * - GET /api/patient/profile (for patients)
+ * - GET /api/doctor/profile (for doctors)
+ * - GET /api/admin/profile (for admins)
+ */
 export const fetchUserProfile = createAsyncThunk(
   'user/fetchProfile',
   async (_, { getState, rejectWithValue }) => {
@@ -13,11 +20,11 @@ export const fetchUserProfile = createAsyncThunk(
       let endpoint = '';
       
       if (role === 'patient') {
-        endpoint = '/api/patient/profile';
+        endpoint = API_URLS.PATIENT.PROFILE;
       } else if (role === 'medecin') {
-        endpoint = '/api/doctor/profile';
+        endpoint = API_URLS.DOCTOR.PROFILE;
       } else if (role === 'admin') {
-        endpoint = '/api/admin/profile';
+        endpoint = '/api/admin/profile'; // Not defined in our API_URLS yet
       }
       
       if (!endpoint) return null;
@@ -25,11 +32,21 @@ export const fetchUserProfile = createAsyncThunk(
       const response = await axios.get(endpoint);
       return response.data;
     } catch (error) {
-      return rejectWithValue(error.response.data);
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to fetch profile',
+        errors: error.response?.data?.errors || {}
+      });
     }
   }
 );
 
+/**
+ * Update the user's profile
+ * Routes:
+ * - PUT /api/patient/profile (for patients)
+ * - PUT /api/doctor/profile (for doctors)
+ * - PUT /api/admin/profile (for admins)
+ */
 export const updateUserProfile = createAsyncThunk(
   'user/updateProfile',
   async (profileData, { getState, rejectWithValue }) => {
@@ -41,11 +58,11 @@ export const updateUserProfile = createAsyncThunk(
       let endpoint = '';
       
       if (role === 'patient') {
-        endpoint = '/api/patient/profile';
+        endpoint = API_URLS.PATIENT.UPDATE_PROFILE;
       } else if (role === 'medecin') {
-        endpoint = '/api/doctor/profile';
+        endpoint = API_URLS.DOCTOR.UPDATE_PROFILE;
       } else if (role === 'admin') {
-        endpoint = '/api/admin/profile';
+        endpoint = '/api/admin/profile'; // Not defined in our API_URLS yet
       }
       
       if (!endpoint) return null;
@@ -53,11 +70,21 @@ export const updateUserProfile = createAsyncThunk(
       const response = await axios.put(endpoint, profileData);
       return response.data;
     } catch (error) {
-      return rejectWithValue(error.response.data);
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to update profile',
+        errors: error.response?.data?.errors || {}
+      });
     }
   }
 );
 
+/**
+ * Update the user's password
+ * Routes:
+ * - PUT /api/patient/profile/password (for patients)
+ * - PUT /api/doctor/profile/password (for doctors)
+ * - PUT /api/admin/profile/password (for admins)
+ */
 export const updateUserPassword = createAsyncThunk(
   'user/updatePassword',
   async (passwordData, { getState, rejectWithValue }) => {
@@ -69,11 +96,11 @@ export const updateUserPassword = createAsyncThunk(
       let endpoint = '';
       
       if (role === 'patient') {
-        endpoint = '/api/patient/profile/password';
+        endpoint = API_URLS.PATIENT.UPDATE_PASSWORD;
       } else if (role === 'medecin') {
-        endpoint = '/api/doctor/profile/password';
+        endpoint = API_URLS.DOCTOR.UPDATE_PASSWORD;
       } else if (role === 'admin') {
-        endpoint = '/api/admin/profile/password';
+        endpoint = '/api/admin/profile/password'; // Not defined in our API_URLS yet
       }
       
       if (!endpoint) return null;
@@ -81,14 +108,24 @@ export const updateUserPassword = createAsyncThunk(
       const response = await axios.put(endpoint, passwordData);
       return response.data;
     } catch (error) {
-      return rejectWithValue(error.response.data);
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to update password',
+        errors: error.response?.data?.errors || {}
+      });
     }
   }
 );
 
+/**
+ * Upload user profile photo
+ * Routes:
+ * - POST /api/patient/profile/photo (for patients)
+ * - POST /api/doctor/profile/photo (for doctors)
+ * - POST /api/admin/profile/photo (for admins)
+ */
 export const uploadUserPhoto = createAsyncThunk(
   'user/uploadPhoto',
-  async (photoData, { getState, rejectWithValue }) => {
+  async (photoFile, { getState, rejectWithValue }) => {
     try {
       const { auth } = getState();
       if (!auth.user) return null;
@@ -97,17 +134,17 @@ export const uploadUserPhoto = createAsyncThunk(
       let endpoint = '';
       
       if (role === 'patient') {
-        endpoint = '/api/patient/profile/photo';
+        endpoint = API_URLS.PATIENT.UPDATE_PHOTO;
       } else if (role === 'medecin') {
-        endpoint = '/api/doctor/profile/photo';
+        endpoint = API_URLS.DOCTOR.UPDATE_PHOTO;
       } else if (role === 'admin') {
-        endpoint = '/api/admin/profile/photo';
+        endpoint = '/api/admin/profile/photo'; // Not defined in our API_URLS yet
       }
       
       if (!endpoint) return null;
       
       const formData = new FormData();
-      formData.append('photo', photoData);
+      formData.append('photo', photoFile);
       
       const response = await axios.post(endpoint, formData, {
         headers: {
@@ -116,7 +153,10 @@ export const uploadUserPhoto = createAsyncThunk(
       });
       return response.data;
     } catch (error) {
-      return rejectWithValue(error.response.data);
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to upload photo',
+        errors: error.response?.data?.errors || {}
+      });
     }
   }
 );
@@ -186,7 +226,7 @@ const userSlice = createSlice({
         state.status = 'succeeded';
         if (state.profile && action.payload) {
           if (state.profile.user) {
-            state.profile.user.photo = action.payload.photo_url;
+            state.profile.user.photo = action.payload.photo_url || action.payload.path;
           }
         }
       })
@@ -197,8 +237,10 @@ const userSlice = createSlice({
   },
 });
 
+// Actions
 export const { clearProfile } = userSlice.actions;
 
+// Selectors
 export const selectUserProfile = (state) => state.user.profile;
 export const selectUserStatus = (state) => state.user.status;
 export const selectUserError = (state) => state.user.error;

@@ -1,37 +1,38 @@
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
-import ApiService from "../services/api";
+import { useDispatch, useSelector } from "react-redux";
+import { 
+    fetchPatientAppointments, 
+    updateAppointmentStatus,
+    selectPatientAppointments,
+    selectPatientStatus,
+    selectPatientError
+} from "../redux/slices/patientSlice";
+import { selectCurrentUser } from "../redux/slices/authSlice";
 import moment from "moment";
 
 const PatientAppointments = () => {
     const { doctorId } = useParams(); // Get doctorId from the route
-    const [appointments, setAppointments] = useState([]);
-    const [error, setError] = useState(null);
-    const patientId = 1; // Hardcoded for now; replace with authenticated user's ID
+    const dispatch = useDispatch();
+    
+    // Get user and appointments from Redux
+    const user = useSelector(selectCurrentUser);
+    const appointments = useSelector(selectPatientAppointments);
+    const status = useSelector(selectPatientStatus);
+    const error = useSelector(selectPatientError);
+    
     // Track the updated status for each appointment
     const [statusUpdates, setStatusUpdates] = useState({});
+    
+    // Determine which ID to use for fetching appointments
+    const patientId = user?.id;
+    const fetchId = doctorId || patientId;
 
     useEffect(() => {
-        const fetchAppointments = async () => {
-            try {
-                let response;
-                if (doctorId) {
-                    // Fetch appointments for the doctor (used in /doctor/:doctorId/appointments)
-                    response = await ApiService.getAppointments(doctorId);
-                } else {
-                    // Fetch appointments for the patient (used in /my-appointments)
-                    response = await ApiService.getPatientAppointments(patientId);
-                }
-                setAppointments(response.data.data);
-                setError(null);
-            } catch (error) {
-                console.error("Error fetching appointments:", error);
-                setError("Failed to fetch appointments. Please try again later.");
-            }
-        };
-
-        fetchAppointments();
-    }, [doctorId]);
+        if (fetchId) {
+            dispatch(fetchPatientAppointments(fetchId));
+        }
+    }, [dispatch, fetchId]);
 
     // Handle status change in the dropdown
     const handleStatusChange = (appointmentId, newStatus) => {
@@ -41,7 +42,7 @@ const PatientAppointments = () => {
         }));
     };
 
-    // Update the appointment status via API
+    // Update the appointment status via Redux
     const handleUpdateStatus = async (appointmentId) => {
         const newStatus = statusUpdates[appointmentId];
         if (!newStatus) {
@@ -49,47 +50,69 @@ const PatientAppointments = () => {
             return;
         }
 
-        try {
-            await ApiService.updateAppointmentStatus(appointmentId, { statut: newStatus });
-            alert("Status updated successfully!");
-            // Refresh the appointments list
-            const response = doctorId
-                ? await ApiService.getAppointments(doctorId)
-                : await ApiService.getPatientAppointments(patientId);
-            setAppointments(response.data.data);
-            // Clear the status update for this appointment
-            setStatusUpdates((prev) => {
-                const updated = { ...prev };
-                delete updated[appointmentId];
-                return updated;
+        dispatch(updateAppointmentStatus({ appointmentId, status: newStatus }))
+            .unwrap()
+            .then(() => {
+                alert("Status updated successfully!");
+                // Refresh the appointments list
+                dispatch(fetchPatientAppointments(fetchId));
+                // Clear the status update for this appointment
+                setStatusUpdates((prev) => {
+                    const updated = { ...prev };
+                    delete updated[appointmentId];
+                    return updated;
+                });
+            })
+            .catch((error) => {
+                alert(`Failed to update status: ${error.message || "Please try again."}`);
             });
-        } catch (error) {
-            console.error("Error updating appointment status:", error);
-            setError("Failed to update appointment status. Please try again.");
-        }
     };
+
+    const isLoading = status === 'loading';
 
     return (
         <div className="container mt-4">
             <h2>{doctorId ? `Patient Appointments for Doctor ID: ${doctorId}` : "My Appointments"}</h2>
+            
             {error && <div className="alert alert-danger">{error}</div>}
-            {appointments.length > 0 ? (
+            
+            {isLoading ? (
+                <div className="text-center my-4">
+                    <output className="spinner-border text-primary">
+                        <span className="visually-hidden">Loading...</span>
+                    </output>
+                </div>
+            ) : appointments.length > 0 ? (
                 <table className="table table-striped">
                     <thead>
-                        <tr><th>Patient Name</th><th>Date & Time</th><th>Status</th>{doctorId && <th>Actions</th>}</tr>
+                        <tr>
+                            <th>Patient Name</th>
+                            <th>Date & Time</th>
+                            <th>Status</th>
+                            {doctorId && <th>Actions</th>}
+                        </tr>
                     </thead>
                     <tbody>
                         {appointments.map((appointment) => (
                             <tr key={appointment.id}>
                                 <td>{appointment.patient_name || 'N/A'}</td>
                                 <td>{moment(appointment.date_heure).format("YYYY-MM-DD HH:mm")}</td>
-                                <td>{appointment.statut}</td>
+                                <td>
+                                    <span className={`badge bg-${
+                                        appointment.statut === 'confirmé' ? 'success' :
+                                        appointment.statut === 'en_attente' ? 'warning' :
+                                        appointment.statut === 'annulé' ? 'danger' : 'secondary'
+                                    }`}>
+                                        {appointment.statut}
+                                    </span>
+                                </td>
                                 {doctorId && (
                                     <td>
                                         <select
                                             value={statusUpdates[appointment.id] || ""}
                                             onChange={(e) => handleStatusChange(appointment.id, e.target.value)}
                                             className="form-select d-inline-block w-auto me-2"
+                                            disabled={isLoading}
                                         >
                                             <option value="">Select Status</option>
                                             <option value="confirmé">Confirmé</option>
@@ -100,9 +123,13 @@ const PatientAppointments = () => {
                                         <button
                                             className="btn btn-primary btn-sm"
                                             onClick={() => handleUpdateStatus(appointment.id)}
-                                            disabled={!statusUpdates[appointment.id]}
+                                            disabled={!statusUpdates[appointment.id] || isLoading}
                                         >
-                                            Save
+                                            {isLoading ? (
+                                                <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                            ) : (
+                                                "Save"
+                                            )}
                                         </button>
                                     </td>
                                 )}

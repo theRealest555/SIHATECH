@@ -1,47 +1,90 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import axios from '../../api/axios';
+import { API_URLS } from '../../constants/apiUrls';
 
-// Async thunks for patient data
+/**
+ * Fetch appointments for a patient or doctor
+ * Matches backend route: GET /api/appointments
+ */
 export const fetchPatientAppointments = createAsyncThunk(
   'patient/fetchAppointments',
-  async (patientId, { rejectWithValue }) => {
+  async (id, { getState, rejectWithValue }) => {
     try {
-      const response = await axios.get('/api/appointments', {
-        params: { patient_id: patientId }
-      });
+      const { auth } = getState();
+      const userRole = auth.user?.role;
+      
+      // Determine if we're fetching for a patient or doctor
+      const params = {};
+      if (userRole === 'patient') {
+        params.patient_id = id;
+      } else if (userRole === 'medecin') {
+        params.doctor_id = id;
+      }
+      
+      const response = await axios.get(API_URLS.APPOINTMENTS.LIST, { params });
+      
+      // Backend returns { status: 'success', data: [...] }
       return response.data.data || [];
     } catch (error) {
-      return rejectWithValue(error.response?.data || { message: 'Failed to fetch appointments' });
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to fetch appointments'
+      });
     }
   }
 );
 
+/**
+ * Book a new appointment
+ * Matches backend route: POST /api/appointments
+ */
 export const bookAppointment = createAsyncThunk(
   'patient/bookAppointment',
   async ({ doctorId, patientId, date_heure }, { rejectWithValue }) => {
     try {
-      const response = await axios.post(`/api/appointments`, {
+      // Backend expects doctor_id not doctorId
+      const appointmentData = {
         doctor_id: doctorId,
         patient_id: patientId,
         date_heure,
-      });
+      };
+      
+      const response = await axios.post(
+        API_URLS.APPOINTMENTS.BOOK, 
+        appointmentData
+      );
+      
+      // Backend returns { status: 'success', data: {...} }
       return response.data.data || {};
     } catch (error) {
-      return rejectWithValue(error.response?.data || { message: 'Failed to book appointment' });
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to book appointment',
+        errors: error.response?.data?.errors || {}
+      });
     }
   }
 );
 
+/**
+ * Update an appointment's status
+ * Matches backend route: PATCH /api/appointments/{id}/status
+ */
 export const updateAppointmentStatus = createAsyncThunk(
   'patient/updateAppointmentStatus',
   async ({ appointmentId, status }, { rejectWithValue }) => {
     try {
-      const response = await axios.patch(`/api/appointments/${appointmentId}/status`, {
-        statut: status
-      });
+      // Backend expects 'statut' not 'status'
+      const response = await axios.patch(
+        API_URLS.APPOINTMENTS.UPDATE_STATUS(appointmentId), 
+        { statut: status }
+      );
+      
+      // Backend returns { status: 'success', data: {...} }
       return response.data.data || {};
     } catch (error) {
-      return rejectWithValue(error.response?.data || { message: 'Failed to update appointment status' });
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to update appointment status',
+        errors: error.response?.data?.errors || {}
+      });
     }
   }
 );
@@ -113,8 +156,10 @@ const patientSlice = createSlice({
   },
 });
 
+// Actions
 export const { clearPatientData } = patientSlice.actions;
 
+// Selectors
 export const selectPatientAppointments = (state) => state.patient.appointments;
 export const selectPatientStatus = (state) => state.patient.status;
 export const selectPatientError = (state) => state.patient.error;

@@ -1,55 +1,73 @@
 import { useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import ApiService from "../services/api";
+import { useDispatch, useSelector } from "react-redux";
+import { 
+    fetchDoctorAvailability, 
+    createDoctorLeave,
+    deleteDoctorLeave,
+    selectDoctorAvailability,
+    selectDoctorStatus,
+    selectDoctorError
+} from "../redux/slices/doctorSlice";
 
 const LeaveForm = () => {
     const location = useLocation();
     const navigate = useNavigate();
+    const dispatch = useDispatch();
+    
     const doctorId = location.state?.doctorId || 1; // Fallback to 1 if not provided
 
-    const [leaves, setLeaves] = useState([]);
+    // Get data from Redux
+    const availability = useSelector(selectDoctorAvailability);
+    const status = useSelector(selectDoctorStatus);
+    const error = useSelector(selectDoctorError);
+    
+    // Local state
     const [startDate, setStartDate] = useState(location.state?.startDate || "");
     const [endDate, setEndDate] = useState(location.state?.endDate || "");
     const [reason, setReason] = useState("");
-    const [error, setError] = useState(null);
+    
+    // Derived state
+    const leaves = availability?.leaves || [];
+    const isLoading = status === 'loading';
 
     useEffect(() => {
-        const fetchLeaves = async () => {
-            try {
-                const response = await ApiService.getAvailability(doctorId);
-                setLeaves(response.data.data.leaves);
-                setError(null);
-            } catch (error) {
-                console.error("Error fetching leaves:", error);
-                setError("Failed to load leaves. Please try again later.");
-            }
-        };
         if (doctorId) {
-            fetchLeaves();
+            dispatch(fetchDoctorAvailability(doctorId));
         }
-    }, [doctorId]);
+    }, [dispatch, doctorId]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        try {
-            await ApiService.createLeave(doctorId, { start_date: startDate, end_date: endDate, reason });
-            setError(null);
-            navigate(`/doctor-calendar/${doctorId}`); // Redirect to the doctor's calendar
-        } catch (error) {
-            console.error("Error creating leave:", error);
-            setError("Failed to create leave: " + (error.response?.data?.error || "Unknown error"));
-        }
+        
+        // Dispatch action to create leave
+        dispatch(createDoctorLeave({
+            doctorId,
+            leaveData: { start_date: startDate, end_date: endDate, reason }
+        }))
+        .unwrap()
+        .then(() => {
+            // Clear form and navigate on success
+            setStartDate("");
+            setEndDate("");
+            setReason("");
+            navigate(`/doctor-calendar/${doctorId}`);
+        })
+        .catch((error) => {
+            // Error is handled by the Redux slice and displayed from state
+            console.error("Failed to create leave:", error);
+        });
     };
 
     const handleDelete = async (leaveId) => {
-        try {
-            await ApiService.deleteLeave(doctorId, leaveId);
-            setLeaves(leaves.filter((leave) => leave.id !== leaveId));
-            setError(null);
-        } catch (error) {
-            console.error("Error deleting leave:", error);
-            setError("Failed to delete leave: " + (error.response?.data?.error || "Unknown error"));
-        }
+        dispatch(deleteDoctorLeave({ doctorId, leaveId }))
+            .unwrap()
+            .then(() => {
+                // Success message handled by Redux
+            })
+            .catch((error) => {
+                console.error("Failed to delete leave:", error);
+            });
     };
 
     return (
@@ -66,6 +84,8 @@ const LeaveForm = () => {
                             onChange={(e) => setStartDate(e.target.value)}
                             className="form-control"
                             required
+                            disabled={isLoading}
+                            min={new Date().toISOString().split('T')[0]}
                         />
                     </div>
                     <div className="col-md-4">
@@ -76,6 +96,8 @@ const LeaveForm = () => {
                             onChange={(e) => setEndDate(e.target.value)}
                             className="form-control"
                             required
+                            disabled={isLoading}
+                            min={startDate || new Date().toISOString().split('T')[0]}
                         />
                     </div>
                     <div className="col-md-4">
@@ -86,15 +108,33 @@ const LeaveForm = () => {
                             onChange={(e) => setReason(e.target.value)}
                             className="form-control"
                             required
+                            disabled={isLoading}
                         />
                     </div>
                 </div>
-                <button type="submit" className="btn btn-primary mt-3">
-                    Add Leave
+                <button 
+                    type="submit" 
+                    className="btn btn-primary mt-3"
+                    disabled={isLoading}
+                >
+                    {isLoading ? (
+                        <>
+                            <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                            Processing...
+                        </>
+                    ) : (
+                        "Add Leave"
+                    )}
                 </button>
             </form>
             <h3>Existing Leaves</h3>
-            {leaves.length ? (
+            {isLoading ? (
+                <div className="text-center my-4">
+                    <div className="spinner-border text-primary" role="status">
+                        <span className="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            ) : leaves.length ? (
                 <ul className="list-group">
                     {leaves.map((leave) => (
                         <li key={leave.id} className="list-group-item d-flex justify-content-between align-items-center">
@@ -104,8 +144,13 @@ const LeaveForm = () => {
                             <button
                                 onClick={() => handleDelete(leave.id)}
                                 className="btn btn-danger btn-sm"
+                                disabled={isLoading}
                             >
-                                Delete
+                                {isLoading ? (
+                                    <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                ) : (
+                                    "Delete"
+                                )}
                             </button>
                         </li>
                     ))}

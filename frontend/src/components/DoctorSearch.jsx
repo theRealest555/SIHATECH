@@ -1,50 +1,45 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import ApiService from "../services/api";
+import { useDispatch, useSelector } from "react-redux";
+import { 
+  fetchDoctorSpecialities, 
+  fetchDoctorLocations, 
+  searchDoctors,
+  selectDoctorSpecialities,
+  selectDoctorLocations,
+  selectDoctorSearchResults,
+  selectDoctorStatus,
+  selectDoctorError
+} from "../redux/slices/doctorSlice";
 import moment from "moment";
 
 const DoctorSearch = () => {
     const navigate = useNavigate();
+    const dispatch = useDispatch();
 
-    const [specialities, setSpecialities] = useState([]);
-    const [locations, setLocations] = useState([]);
-    const [doctors, setDoctors] = useState([]);
+    // Get data from Redux store
+    const specialities = useSelector(selectDoctorSpecialities);
+    const locations = useSelector(selectDoctorLocations);
+    const doctors = useSelector(selectDoctorSearchResults);
+    const status = useSelector(selectDoctorStatus);
+    const error = useSelector(selectDoctorError);
+
     const [filters, setFilters] = useState({
         speciality: "",
         location: "",
         date: moment().format("YYYY-MM-DD"),
     });
-    const [error, setError] = useState(null);
 
     useEffect(() => {
-        const fetchFilters = async () => {
-            try {
-                const [specialitiesRes, locationsRes] = await Promise.all([
-                    ApiService.getSpecialities(),
-                    ApiService.getLocations(),
-                ]);
-                setSpecialities(specialitiesRes.data.data);
-                setLocations(locationsRes.data.data);
-            } catch (error) {
-                console.error("Error fetching filters:", error);
-                setError("Failed to load filters. Please try again later.");
-            }
-        };
-        fetchFilters();
-    }, []);
+        // Fetch filter options
+        dispatch(fetchDoctorSpecialities());
+        dispatch(fetchDoctorLocations());
+    }, [dispatch]);
 
     useEffect(() => {
-        const fetchDoctors = async () => {
-            try {
-                const response = await ApiService.searchDoctors(filters);
-                setDoctors(response.data.data);
-            } catch (error) {
-                console.error("Error searching doctors:", error);
-                setError("Failed to search doctors. Please try again later.");
-            }
-        };
-        fetchDoctors();
-    }, [filters]);
+        // Search doctors when filters change
+        dispatch(searchDoctors(filters));
+    }, [dispatch, filters]);
 
     const handleFilterChange = (e) => {
         const { name, value } = e.target;
@@ -52,12 +47,14 @@ const DoctorSearch = () => {
     };
 
     const handleViewCalendar = (doctorId) => {
-    navigate(`/doctor-calendar/${doctorId}`, { state: { date: filters.date, doctorId } });
+        navigate(`/doctor-calendar/${doctorId}`, { state: { date: filters.date, doctorId } });
     };
 
     const handleViewAppointments = (doctorId) => {
         navigate(`/doctor/${doctorId}/appointments`, { state: { doctorId } });
     };
+
+    const isLoading = status === 'loading';
 
     return (
         <div>
@@ -72,6 +69,7 @@ const DoctorSearch = () => {
                         className="form-select"
                         value={filters.speciality}
                         onChange={handleFilterChange}
+                        disabled={isLoading}
                     >
                         <option value="">All Specialities</option>
                         {specialities.map((spec, index) => (
@@ -87,6 +85,7 @@ const DoctorSearch = () => {
                         className="form-select"
                         value={filters.location}
                         onChange={handleFilterChange}
+                        disabled={isLoading}
                     >
                         <option value="">All Locations</option>
                         {locations.map((loc, index) => (
@@ -94,7 +93,7 @@ const DoctorSearch = () => {
                         ))}
                     </select>
                 </div>
-                {/* <div className="col-md-4">
+                <div className="col-md-4">
                     <label htmlFor="date" className="form-label">Date</label>
                     <input
                         type="date"
@@ -104,16 +103,29 @@ const DoctorSearch = () => {
                         value={filters.date}
                         onChange={handleFilterChange}
                         min={moment().format("YYYY-MM-DD")}
+                        disabled={isLoading}
                     />
-                </div> */}
+                </div>
             </div>
+            
             <h3>Matching Doctors</h3>
-            {doctors.length ? (
+            {isLoading ? (
+                <div className="d-flex justify-content-center my-4">
+                    <div className="spinner-border text-primary" role="status">
+                        <span className="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            ) : doctors.length ? (
                 <ul className="list-group">
                     {doctors.map((doctor) => (
                         <li key={doctor.id} className="list-group-item d-flex justify-content-between align-items-center">
                             <div>
                                 <strong>{doctor.name || 'N/A'}</strong> - {doctor.speciality || 'N/A'} ({doctor.location || 'N/A'})
+                                {doctor.available_slots && doctor.available_slots.length > 0 && (
+                                    <span className="badge bg-success ms-2">
+                                        {doctor.available_slots.length} slots available
+                                    </span>
+                                )}
                             </div>
                             <div>
                                 <button

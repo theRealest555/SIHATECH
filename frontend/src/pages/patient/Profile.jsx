@@ -1,35 +1,61 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useDispatch, useSelector } from 'react-redux';
 import { Container, Row, Col, Card, Form, Button, Alert, Badge, Modal, Spinner, Table } from 'react-bootstrap';
-import ApiService from '../../services/api';
-import axios from 'axios';
+import { 
+  fetchUserProfile, 
+  updateUserProfile, 
+  updateUserPassword,
+  uploadUserPhoto,
+  selectUserProfile,
+  selectUserStatus,
+  selectUserError
+} from '../../redux/slices/userSlice';
+import { 
+  fetchAllDoctors,
+  selectAllDoctors,
+  selectDoctorStatus
+} from '../../redux/slices/doctorSlice';
+import {
+  fetchPatientAppointments,
+  updateAppointmentStatus,
+  selectPatientAppointments,
+  selectPatientStatus,
+  selectPatientError
+} from '../../redux/slices/patientSlice';
+import { 
+  selectCurrentUser,
+  logout
+} from '../../redux/slices/authSlice';
 import moment from 'moment';
 
 const PatientProfile = () => {
   const navigate = useNavigate();
-  const [profile, setProfile] = useState({
-    user: {
-      nom: '',
-      prenom: '',
-      email: '',
-      telephone: '',
-      adresse: '',
-      sexe: '',
-      date_de_naissance: '',
-      photo: null,
-    },
-    patient: {
-      medecin_favori_id: null,
-      medecinFavori: null
-    }
-  });
-  const [appointments, setAppointments] = useState([]);
-  const [doctors, setDoctors] = useState([]);
+  const dispatch = useDispatch();
+
+  // Get data from Redux
+  const user = useSelector(selectCurrentUser);
+  const profile = useSelector(selectUserProfile);
+  const userStatus = useSelector(selectUserStatus);
+  const userError = useSelector(selectUserError);
+  const doctors = useSelector(selectAllDoctors);
+  const doctorStatus = useSelector(selectDoctorStatus);
+  const appointments = useSelector(selectPatientAppointments);
+  const appointmentStatus = useSelector(selectPatientStatus);
+  const appointmentError = useSelector(selectPatientError);
+
+  // Local state
   const [isEditing, setIsEditing] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(false);
+  const [formData, setFormData] = useState({
+    nom: '',
+    prenom: '',
+    email: '',
+    telephone: '',
+    adresse: '',
+    sexe: '',
+    date_de_naissance: '',
+    medecin_favori_id: '',
+  });
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordData, setPasswordData] = useState({
     current_password: '',
@@ -38,193 +64,161 @@ const PatientProfile = () => {
   });
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [photoFile, setPhotoFile] = useState(null);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  
+  // UI states
+  const [success, setSuccess] = useState(false);
 
+  // Check loading states
+  const isLoading = userStatus === 'loading';
+  const isAppointmentLoading = appointmentStatus === 'loading';
+  const isDoctorsLoading = doctorStatus === 'loading';
+
+  // Initialize data
   useEffect(() => {
-    fetchProfile();
-    fetchDoctors();
-  }, []);
+    dispatch(fetchUserProfile());
+    dispatch(fetchAllDoctors());
+    if (user?.id) {
+      dispatch(fetchPatientAppointments(user.id));
+    }
+  }, [dispatch, user?.id]);
 
-  const fetchProfile = async () => {
-    try {
-      setLoading(true);
-      const response = await axios.get('http://localhost:8000/api/patient/profile', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+  // Update form data when profile loads
+  useEffect(() => {
+    if (profile) {
+      setFormData({
+        nom: profile.user?.nom || '',
+        prenom: profile.user?.prenom || '',
+        email: profile.user?.email || '',
+        telephone: profile.user?.telephone || '',
+        adresse: profile.user?.adresse || '',
+        sexe: profile.user?.sexe || '',
+        date_de_naissance: profile.user?.date_de_naissance || '',
+        medecin_favori_id: profile.patient?.medecin_favori_id || '',
       });
-      
-      setProfile({
-        user: response.data.user,
-        patient: response.data.patient || {}
-      });
-      
-      // Fetch appointments
-      fetchAppointments(response.data.user.id);
-    } catch (err) {
-      console.error('Error fetching profile:', err);
-      setError('Failed to load profile data');
-      if (err.response?.status === 401) {
-        navigate('/login');
-      }
-    } finally {
-      setLoading(false);
     }
-  };
-
-  const fetchAppointments = async (userId) => {
-    try {
-      const response = await ApiService.getPatientAppointments(userId);
-      setAppointments(response.data.data || []);
-    } catch (err) {
-      console.error('Error fetching appointments:', err);
-    }
-  };
-
-  const fetchDoctors = async () => {
-    try {
-      const response = await ApiService.getDoctors();
-      setDoctors(response.data.data || []);
-    } catch (err) {
-      console.error('Error fetching doctors:', err);
-    }
-  };
+  }, [profile]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    if (name === 'medecin_favori_id') {
-      setProfile(prev => ({
-        ...prev,
-        patient: { ...prev.patient, medecin_favori_id: value }
-      }));
-    } else {
-      setProfile(prev => ({
-        ...prev,
-        user: { ...prev.user, [name]: value }
-      }));
-    }
+    setFormData({ ...formData, [name]: value });
   };
 
   const handleEdit = () => {
     setIsEditing(true);
-    setError(null);
     setSuccess(false);
   };
 
   const handleCancel = () => {
-    fetchProfile();
-    setIsEditing(false);
-    setError(null);
-  };
-
-  const handleSave = async (e) => {
-    e.preventDefault();
-    setSaving(true);
-    setError(null);
-
-    try {
-      const updateData = {
-        nom: profile.user.nom,
-        prenom: profile.user.prenom,
-        email: profile.user.email,
-        telephone: profile.user.telephone,
-        adresse: profile.user.adresse,
-        sexe: profile.user.sexe,
-        date_de_naissance: profile.user.date_de_naissance,
-        medecin_favori_id: profile.patient.medecin_favori_id
-      };
-
-      await axios.put('http://localhost:8000/api/patient/profile', updateData, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+    if (profile) {
+      setFormData({
+        nom: profile.user?.nom || '',
+        prenom: profile.user?.prenom || '',
+        email: profile.user?.email || '',
+        telephone: profile.user?.telephone || '',
+        adresse: profile.user?.adresse || '',
+        sexe: profile.user?.sexe || '',
+        date_de_naissance: profile.user?.date_de_naissance || '',
+        medecin_favori_id: profile.patient?.medecin_favori_id || '',
       });
-      
-      setIsEditing(false);
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
-      fetchProfile();
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to update profile');
-    } finally {
-      setSaving(false);
     }
+    setIsEditing(false);
   };
 
-  const handlePasswordUpdate = async (e) => {
+  const handleSave = (e) => {
     e.preventDefault();
-    setError(null);
+    dispatch(updateUserProfile(formData))
+      .unwrap()
+      .then(() => {
+        setIsEditing(false);
+        setSuccess(true);
+        setTimeout(() => setSuccess(false), 3000);
+      })
+      .catch((error) => {
+        console.error('Profile update error:', error);
+      });
+  };
+
+  const handlePasswordChange = (e) => {
+    const { name, value } = e.target;
+    setPasswordData({ ...passwordData, [name]: value });
+  };
+
+  const handlePasswordUpdate = (e) => {
+    e.preventDefault();
     
     if (passwordData.password !== passwordData.password_confirmation) {
-      setError('Passwords do not match');
+      alert('Passwords do not match');
       return;
     }
-
-    try {
-      await axios.put('http://localhost:8000/api/patient/profile/password', passwordData, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+    
+    dispatch(updateUserPassword(passwordData))
+      .unwrap()
+      .then(() => {
+        setShowPasswordModal(false);
+        setPasswordData({ current_password: '', password: '', password_confirmation: '' });
+        setSuccess(true);
+        setTimeout(() => setSuccess(false), 3000);
+      })
+      .catch((error) => {
+        console.error('Password update error:', error);
       });
-      
-      setShowPasswordModal(false);
-      setPasswordData({ current_password: '', password: '', password_confirmation: '' });
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to update password');
-    }
   };
 
-  const handlePhotoUpload = async (e) => {
+  const handlePhotoUpload = (e) => {
     e.preventDefault();
     if (!photoFile) return;
-
-    setUploadingPhoto(true);
-    const formData = new FormData();
-    formData.append('photo', photoFile);
-
-    try {
-      const response = await axios.post('http://localhost:8000/api/patient/profile/photo', formData, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'multipart/form-data'
-        }
+    
+    dispatch(uploadUserPhoto(photoFile))
+      .unwrap()
+      .then(() => {
+        setShowPhotoModal(false);
+        setPhotoFile(null);
+        setSuccess(true);
+        setTimeout(() => setSuccess(false), 3000);
+      })
+      .catch((error) => {
+        console.error('Photo upload error:', error);
       });
-      
-      setShowPhotoModal(false);
-      setPhotoFile(null);
-      fetchProfile();
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to upload photo');
-    } finally {
-      setUploadingPhoto(false);
-    }
+  };
+
+  const handleLogout = () => {
+    dispatch(logout())
+      .unwrap()
+      .then(() => {
+        navigate('/login');
+      })
+      .catch((error) => {
+        console.error('Logout error:', error);
+        navigate('/login');
+      });
+  };
+
+  const handleCancelAppointment = (appointmentId) => {
+    dispatch(updateAppointmentStatus({ appointmentId, status: 'annulé' }))
+      .unwrap()
+      .then(() => {
+        if (user?.id) {
+          dispatch(fetchPatientAppointments(user.id));
+        }
+        setSuccess(true);
+        setTimeout(() => setSuccess(false), 3000);
+      })
+      .catch((error) => {
+        console.error('Cancel appointment error:', error);
+      });
   };
 
   const getStatusBadgeClass = (status) => {
     switch (status) {
-      case 'confirmé':
-        return 'success';
-      case 'en_attente':
-        return 'warning';
-      case 'annulé':
-        return 'danger';
-      case 'terminé':
-        return 'secondary';
-      default:
-        return 'light';
+      case 'confirmé': return 'success';
+      case 'en_attente': return 'warning';
+      case 'annulé': return 'danger';
+      case 'terminé': return 'secondary';
+      default: return 'light';
     }
   };
 
-  const handleCancelAppointment = async (appointmentId) => {
-    try {
-      await ApiService.updateAppointmentStatus(appointmentId, { statut: 'annulé' });
-      fetchAppointments(profile.user.id);
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
-    } catch (err) {
-      setError('Failed to cancel appointment');
-    }
-  };
-
-  if (loading) {
+  if (isLoading && !profile) {
     return (
       <Container className="mt-5">
         <div className="text-center">
@@ -246,7 +240,7 @@ const PatientProfile = () => {
                 <Col md={2} className="text-center">
                   <div className="position-relative d-inline-block">
                     <img
-                      src={profile.user.photo ? `http://localhost:8000/storage/${profile.user.photo}` : 'https://via.placeholder.com/150'}
+                      src={profile?.user?.photo ? `http://localhost:8000/storage/${profile.user.photo}` : 'https://via.placeholder.com/150'}
                       alt="Profile"
                       className="rounded-circle"
                       style={{ width: '120px', height: '120px', objectFit: 'cover' }}
@@ -263,18 +257,18 @@ const PatientProfile = () => {
                   </div>
                 </Col>
                 <Col md={7}>
-                  <h2 className="mb-1">{profile.user.prenom} {profile.user.nom}</h2>
+                  <h2 className="mb-1">{profile?.user?.prenom} {profile?.user?.nom}</h2>
                   <p className="text-muted mb-2">
                     <i className="fas fa-user me-2"></i>
                     Patient
                   </p>
-                  {profile.user.email_verified_at && (
+                  {profile?.user?.email_verified_at && (
                     <Badge bg="info">
                       <i className="fas fa-check-circle me-1"></i>
                       Email Verified
                     </Badge>
                   )}
-                  {profile.patient.medecinFavori && (
+                  {profile?.patient?.medecinFavori && (
                     <p className="mt-2 mb-0">
                       <small className="text-muted">
                         <i className="fas fa-star me-1 text-warning"></i>
@@ -294,11 +288,7 @@ const PatientProfile = () => {
                   </Button>
                   <Button
                     variant="outline-secondary"
-                    onClick={() => {
-                      localStorage.removeItem('token');
-                      localStorage.removeItem('user');
-                      navigate('/login');
-                    }}
+                    onClick={handleLogout}
                     className="w-100"
                   >
                     <i className="fas fa-sign-out-alt me-2"></i>
@@ -309,11 +299,14 @@ const PatientProfile = () => {
             </Card.Body>
           </Card>
 
-          {error && <Alert variant="danger" dismissible onClose={() => setError(null)}>{error}</Alert>}
-          {success && <Alert variant="success" dismissible onClose={() => setSuccess(false)}>
-            <i className="fas fa-check-circle me-2"></i>
-            Operation completed successfully!
-          </Alert>}
+          {userError && <Alert variant="danger" dismissible>{userError}</Alert>}
+          {appointmentError && <Alert variant="danger" dismissible>{appointmentError}</Alert>}
+          {success && (
+            <Alert variant="success" dismissible onClose={() => setSuccess(false)}>
+              <i className="fas fa-check-circle me-2"></i>
+              Operation completed successfully!
+            </Alert>
+          )}
 
           {/* Profile Information */}
           <Card className="mb-4">
@@ -332,9 +325,9 @@ const PatientProfile = () => {
                       <Form.Control
                         type="text"
                         name="prenom"
-                        value={profile.user.prenom}
+                        value={formData.prenom}
                         onChange={handleChange}
-                        disabled={!isEditing}
+                        disabled={!isEditing || isLoading}
                         required
                       />
                     </Form.Group>
@@ -345,9 +338,9 @@ const PatientProfile = () => {
                       <Form.Control
                         type="text"
                         name="nom"
-                        value={profile.user.nom}
+                        value={formData.nom}
                         onChange={handleChange}
-                        disabled={!isEditing}
+                        disabled={!isEditing || isLoading}
                         required
                       />
                     </Form.Group>
@@ -361,9 +354,9 @@ const PatientProfile = () => {
                       <Form.Control
                         type="email"
                         name="email"
-                        value={profile.user.email}
+                        value={formData.email}
                         onChange={handleChange}
-                        disabled={!isEditing}
+                        disabled={!isEditing || isLoading}
                         required
                       />
                     </Form.Group>
@@ -374,9 +367,9 @@ const PatientProfile = () => {
                       <Form.Control
                         type="tel"
                         name="telephone"
-                        value={profile.user.telephone || ''}
+                        value={formData.telephone || ''}
                         onChange={handleChange}
-                        disabled={!isEditing}
+                        disabled={!isEditing || isLoading}
                       />
                     </Form.Group>
                   </Col>
@@ -388,9 +381,9 @@ const PatientProfile = () => {
                       <Form.Label>Gender</Form.Label>
                       <Form.Select
                         name="sexe"
-                        value={profile.user.sexe || ''}
+                        value={formData.sexe || ''}
                         onChange={handleChange}
-                        disabled={!isEditing}
+                        disabled={!isEditing || isLoading}
                       >
                         <option value="">Select...</option>
                         <option value="homme">Male</option>
@@ -404,9 +397,9 @@ const PatientProfile = () => {
                       <Form.Control
                         type="date"
                         name="date_de_naissance"
-                        value={profile.user.date_de_naissance || ''}
+                        value={formData.date_de_naissance || ''}
                         onChange={handleChange}
-                        disabled={!isEditing}
+                        disabled={!isEditing || isLoading}
                       />
                     </Form.Group>
                   </Col>
@@ -415,16 +408,20 @@ const PatientProfile = () => {
                       <Form.Label>Favorite Doctor</Form.Label>
                       <Form.Select
                         name="medecin_favori_id"
-                        value={profile.patient.medecin_favori_id || ''}
+                        value={formData.medecin_favori_id || ''}
                         onChange={handleChange}
-                        disabled={!isEditing}
+                        disabled={!isEditing || isLoading || isDoctorsLoading}
                       >
                         <option value="">No favorite doctor</option>
-                        {doctors.map((doctor) => (
-                          <option key={doctor.id} value={doctor.id}>
-                            Dr. {doctor.name} - {doctor.speciality}
-                          </option>
-                        ))}
+                        {isDoctorsLoading ? (
+                          <option disabled>Loading doctors...</option>
+                        ) : (
+                          doctors.map((doctor) => (
+                            <option key={doctor.id} value={doctor.id}>
+                              Dr. {doctor.name} - {doctor.speciality}
+                            </option>
+                          ))
+                        )}
                       </Form.Select>
                     </Form.Group>
                   </Col>
@@ -436,31 +433,49 @@ const PatientProfile = () => {
                     as="textarea"
                     rows={2}
                     name="adresse"
-                    value={profile.user.adresse || ''}
+                    value={formData.adresse || ''}
                     onChange={handleChange}
-                    disabled={!isEditing}
+                    disabled={!isEditing || isLoading}
                   />
                 </Form.Group>
 
                 <div className="d-flex justify-content-end">
                   {!isEditing ? (
                     <>
-                      <Button variant="secondary" className="me-2" onClick={() => setShowPasswordModal(true)}>
+                      <Button 
+                        variant="secondary" 
+                        className="me-2" 
+                        onClick={() => setShowPasswordModal(true)}
+                        disabled={isLoading}
+                      >
                         <i className="fas fa-key me-2"></i>
                         Change Password
                       </Button>
-                      <Button variant="primary" onClick={handleEdit}>
+                      <Button 
+                        variant="primary" 
+                        onClick={handleEdit}
+                        disabled={isLoading}
+                      >
                         <i className="fas fa-edit me-2"></i>
                         Edit Profile
                       </Button>
                     </>
                   ) : (
                     <>
-                      <Button variant="secondary" className="me-2" onClick={handleCancel} disabled={saving}>
+                      <Button 
+                        variant="secondary" 
+                        className="me-2" 
+                        onClick={handleCancel} 
+                        disabled={isLoading}
+                      >
                         Cancel
                       </Button>
-                      <Button type="submit" variant="primary" disabled={saving}>
-                        {saving ? (
+                      <Button 
+                        type="submit" 
+                        variant="primary" 
+                        disabled={isLoading}
+                      >
+                        {isLoading ? (
                           <>
                             <Spinner animation="border" size="sm" className="me-2" />
                             Saving...
@@ -496,7 +511,12 @@ const PatientProfile = () => {
               </Button>
             </Card.Header>
             <Card.Body>
-              {appointments.length > 0 ? (
+              {isAppointmentLoading ? (
+                <div className="text-center py-4">
+                  <Spinner animation="border" variant="primary" />
+                  <p className="mt-2">Loading appointments...</p>
+                </div>
+              ) : appointments.length > 0 ? (
                 <div className="table-responsive">
                   <Table hover>
                     <thead>
@@ -524,26 +544,23 @@ const PatientProfile = () => {
                             </Badge>
                           </td>
                           <td>
-                            {appointment.statut === 'en_attente' && (
+                            {appointment.statut === 'en_attente' || appointment.statut === 'confirmé' ? (
                               <Button
                                 size="sm"
                                 variant="outline-danger"
                                 onClick={() => handleCancelAppointment(appointment.id)}
+                                disabled={isAppointmentLoading}
                               >
-                                <i className="fas fa-times me-1"></i>
-                                Cancel
+                                {isAppointmentLoading ? (
+                                  <Spinner animation="border" size="sm" />
+                                ) : (
+                                  <>
+                                    <i className="fas fa-times me-1"></i>
+                                    Cancel
+                                  </>
+                                )}
                               </Button>
-                            )}
-                            {appointment.statut === 'confirmé' && (
-                              <Button
-                                size="sm"
-                                variant="outline-warning"
-                                onClick={() => handleCancelAppointment(appointment.id)}
-                              >
-                                <i className="fas fa-times me-1"></i>
-                                Cancel
-                              </Button>
-                            )}
+                            ) : null}
                           </td>
                         </tr>
                       ))}
@@ -578,8 +595,9 @@ const PatientProfile = () => {
               <Form.Label>Current Password</Form.Label>
               <Form.Control
                 type="password"
+                name="current_password"
                 value={passwordData.current_password}
-                onChange={(e) => setPasswordData({...passwordData, current_password: e.target.value})}
+                onChange={handlePasswordChange}
                 required
               />
             </Form.Group>
@@ -587,8 +605,9 @@ const PatientProfile = () => {
               <Form.Label>New Password</Form.Label>
               <Form.Control
                 type="password"
+                name="password"
                 value={passwordData.password}
-                onChange={(e) => setPasswordData({...passwordData, password: e.target.value})}
+                onChange={handlePasswordChange}
                 minLength="8"
                 required
               />
@@ -597,8 +616,9 @@ const PatientProfile = () => {
               <Form.Label>Confirm New Password</Form.Label>
               <Form.Control
                 type="password"
+                name="password_confirmation"
                 value={passwordData.password_confirmation}
-                onChange={(e) => setPasswordData({...passwordData, password_confirmation: e.target.value})}
+                onChange={handlePasswordChange}
                 required
               />
             </Form.Group>
@@ -607,8 +627,16 @@ const PatientProfile = () => {
             <Button variant="secondary" onClick={() => setShowPasswordModal(false)}>
               Cancel
             </Button>
-            <Button variant="primary" type="submit">
-              Update Password
+            <Button 
+              variant="primary" 
+              type="submit"
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <Spinner animation="border" size="sm" />
+              ) : (
+                "Update Password"
+              )}
             </Button>
           </Modal.Footer>
         </Form>
@@ -638,14 +666,15 @@ const PatientProfile = () => {
             <Button variant="secondary" onClick={() => setShowPhotoModal(false)}>
               Cancel
             </Button>
-            <Button variant="primary" type="submit" disabled={!photoFile || uploadingPhoto}>
-              {uploadingPhoto ? (
-                <>
-                  <Spinner animation="border" size="sm" className="me-2" />
-                  Uploading...
-                </>
+            <Button 
+              variant="primary" 
+              type="submit" 
+              disabled={!photoFile || isLoading}
+            >
+              {isLoading ? (
+                <Spinner animation="border" size="sm" />
               ) : (
-                'Upload Photo'
+                "Upload Photo"
               )}
             </Button>
           </Modal.Footer>

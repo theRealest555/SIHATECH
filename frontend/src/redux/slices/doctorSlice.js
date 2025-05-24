@@ -1,115 +1,177 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import axios from '../../api/axios';
+import { API_URLS } from '../../constants/apiUrls';
 
-// Async thunks for doctor data
+/**
+ * Fetch all doctors
+ * Matches backend route: GET /api/doctors
+ */
 export const fetchAllDoctors = createAsyncThunk(
   'doctor/fetchAll',
   async (_, { rejectWithValue }) => {
     try {
-      const response = await axios.get('/api/doctors');
+      const response = await axios.get(API_URLS.DOCTORS.LIST);
       return response.data.data || [];
     } catch (error) {
-      return rejectWithValue(error.response?.data || { message: 'Failed to fetch doctors' });
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to fetch doctors'
+      });
     }
   }
 );
 
+/**
+ * Fetch doctor specialities
+ * Matches backend route: GET /api/doctors/specialities
+ */
 export const fetchDoctorSpecialities = createAsyncThunk(
   'doctor/fetchSpecialities',
   async (_, { rejectWithValue }) => {
     try {
-      const response = await axios.get('/api/doctors/specialities');
+      const response = await axios.get(API_URLS.DOCTORS.SPECIALITIES);
       return response.data.data || [];
     } catch (error) {
-      return rejectWithValue(error.response?.data || { message: 'Failed to fetch specialities' });
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to fetch specialities'
+      });
     }
   }
 );
 
+/**
+ * Fetch doctor locations
+ * Matches backend route: GET /api/doctors/locations
+ */
 export const fetchDoctorLocations = createAsyncThunk(
   'doctor/fetchLocations',
   async (_, { rejectWithValue }) => {
     try {
-      const response = await axios.get('/api/doctors/locations');
+      const response = await axios.get(API_URLS.DOCTORS.LOCATIONS);
       return response.data.data || [];
     } catch (error) {
-      return rejectWithValue(error.response?.data || { message: 'Failed to fetch locations' });
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to fetch locations'
+      });
     }
   }
 );
 
+/**
+ * Search for doctors
+ * Matches backend route: GET /api/doctors/search
+ */
 export const searchDoctors = createAsyncThunk(
   'doctor/search',
   async (filters, { rejectWithValue }) => {
     try {
-      const response = await axios.get('/api/doctors/search', { params: filters });
+      const response = await axios.get(API_URLS.DOCTORS.SEARCH, { params: filters });
       return response.data.data || [];
     } catch (error) {
-      return rejectWithValue(error.response?.data || { message: 'Failed to search doctors' });
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to search doctors'
+      });
     }
   }
 );
 
+/**
+ * Fetch doctor availability
+ * Matches backend route: GET /api/doctors/{doctorId}/availability
+ */
 export const fetchDoctorAvailability = createAsyncThunk(
   'doctor/fetchAvailability',
   async (doctorId, { rejectWithValue }) => {
     try {
-      const response = await axios.get(`/api/doctors/${doctorId}/availability`);
+      const response = await axios.get(API_URLS.DOCTORS.AVAILABILITY(doctorId));
+      // The backend returns data in the format: { status: 'success', data: { schedule: {}, leaves: [] } }
       return response.data.data || { schedule: {}, leaves: [] };
     } catch (error) {
-      return rejectWithValue(error.response?.data || { message: 'Failed to fetch availability' });
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to fetch availability'
+      });
     }
   }
 );
 
+/**
+ * Fetch doctor available slots
+ * Matches backend route: GET /api/doctors/{doctorId}/slots
+ */
 export const fetchDoctorSlots = createAsyncThunk(
   'doctor/fetchSlots',
   async ({ doctorId, date }, { rejectWithValue }) => {
     try {
-      const response = await axios.get(`/api/doctors/${doctorId}/slots`, { params: { date } });
+      const response = await axios.get(API_URLS.DOCTORS.SLOTS(doctorId), { params: { date } });
+      // The backend returns data in the format: { status: 'success', data: ['09:00', '09:30', ...], meta: {} }
       return { doctorId, date, slots: response.data.data || [] };
     } catch (error) {
-      return rejectWithValue(error.response?.data || { message: 'Failed to fetch slots' });
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to fetch slots'
+      });
     }
   }
 );
 
+/**
+ * Update doctor schedule
+ * Matches backend route: POST /api/doctor/schedule
+ */
 export const updateDoctorSchedule = createAsyncThunk(
   'doctor/updateSchedule',
-  async ({ doctorId, schedule }, { rejectWithValue }) => {
+  async ({ schedule }, { rejectWithValue }) => {
     try {
-      const response = await axios.post(`/api/doctor/schedule`, { schedule });
+      const response = await axios.post(API_URLS.DOCTOR.SCHEDULE, { schedule });
       return response.data.data || {};
     } catch (error) {
-      return rejectWithValue(error.response?.data || { message: 'Failed to update schedule' });
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to update schedule',
+        errors: error.response?.data?.errors || {}
+      });
     }
   }
 );
 
+/**
+ * Create doctor leave
+ * Matches backend route: POST /api/doctor/leaves
+ */
 export const createDoctorLeave = createAsyncThunk(
   'doctor/createLeave',
-  async ({ doctorId, leaveData }, { rejectWithValue }) => {
+  async ({ leaveData }, { rejectWithValue }) => {
     try {
-      const response = await axios.post(`/api/doctor/leaves`, leaveData);
+      const response = await axios.post(API_URLS.DOCTOR.LEAVES, leaveData);
       return response.data.data || {};
     } catch (error) {
-      return rejectWithValue(error.response?.data || { message: 'Failed to create leave' });
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to create leave',
+        errors: error.response?.data?.errors || {}
+      });
     }
   }
 );
 
+/**
+ * Delete doctor leave
+ * Matches backend route: DELETE /api/doctor/leaves/{leaveId}
+ */
 export const deleteDoctorLeave = createAsyncThunk(
   'doctor/deleteLeave',
-  async ({ doctorId, leaveId }, { rejectWithValue }) => {
+  async ({ leaveId }, { rejectWithValue }) => {
     try {
-      await axios.delete(`/api/doctor/leaves/${leaveId}`);
-      return { doctorId, leaveId };
+      await axios.delete(API_URLS.DOCTOR.LEAVE(leaveId));
+      return { leaveId };
     } catch (error) {
-      return rejectWithValue(error.response?.data || { message: 'Failed to delete leave' });
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to delete leave'
+      });
     }
   }
 );
 
+/**
+ * Upload doctor document
+ * Matches backend route: POST /api/doctor/documents
+ */
 export const uploadDoctorDocument = createAsyncThunk(
   'doctor/uploadDocument',
   async ({ file, type }, { rejectWithValue }) => {
@@ -118,26 +180,54 @@ export const uploadDoctorDocument = createAsyncThunk(
       formData.append('file', file);
       formData.append('type', type);
       
-      const response = await axios.post('/api/doctor/documents', formData, {
+      const response = await axios.post(API_URLS.DOCTOR.DOCUMENTS, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
       });
       return response.data.document || {};
     } catch (error) {
-      return rejectWithValue(error.response?.data || { message: 'Failed to upload document' });
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to upload document',
+        errors: error.response?.data?.errors || {}
+      });
     }
   }
 );
 
+/**
+ * Fetch doctor documents
+ * Matches backend route: GET /api/doctor/documents
+ */
 export const fetchDoctorDocuments = createAsyncThunk(
   'doctor/fetchDocuments',
   async (_, { rejectWithValue }) => {
     try {
-      const response = await axios.get('/api/doctor/documents');
+      const response = await axios.get(API_URLS.DOCTOR.DOCUMENTS);
       return response.data.documents || [];
     } catch (error) {
-      return rejectWithValue(error.response?.data || { message: 'Failed to fetch documents' });
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to fetch documents'
+      });
+    }
+  }
+);
+
+/**
+ * Complete doctor profile (after social registration)
+ * Matches backend route: POST /api/doctor/complete-profile
+ */
+export const completeDoctorProfile = createAsyncThunk(
+  'doctor/completeProfile',
+  async (profileData, { rejectWithValue }) => {
+    try {
+      const response = await axios.post(API_URLS.DOCTOR.COMPLETE_PROFILE, profileData);
+      return response.data;
+    } catch (error) {
+      return rejectWithValue({
+        message: error.response?.data?.message || 'Failed to complete profile',
+        errors: error.response?.data?.errors || {}
+      });
     }
   }
 );
@@ -171,6 +261,7 @@ const doctorSlice = createSlice({
       // Fetch all doctors
       .addCase(fetchAllDoctors.pending, (state) => {
         state.status = 'loading';
+        state.error = null;
       })
       .addCase(fetchAllDoctors.fulfilled, (state, action) => {
         state.status = 'succeeded';
@@ -184,6 +275,7 @@ const doctorSlice = createSlice({
       // Fetch specialities
       .addCase(fetchDoctorSpecialities.pending, (state) => {
         state.status = 'loading';
+        state.error = null;
       })
       .addCase(fetchDoctorSpecialities.fulfilled, (state, action) => {
         state.status = 'succeeded';
@@ -197,6 +289,7 @@ const doctorSlice = createSlice({
       // Fetch locations
       .addCase(fetchDoctorLocations.pending, (state) => {
         state.status = 'loading';
+        state.error = null;
       })
       .addCase(fetchDoctorLocations.fulfilled, (state, action) => {
         state.status = 'succeeded';
@@ -210,6 +303,7 @@ const doctorSlice = createSlice({
       // Search doctors
       .addCase(searchDoctors.pending, (state) => {
         state.status = 'loading';
+        state.error = null;
       })
       .addCase(searchDoctors.fulfilled, (state, action) => {
         state.status = 'succeeded';
@@ -223,6 +317,7 @@ const doctorSlice = createSlice({
       // Fetch availability
       .addCase(fetchDoctorAvailability.pending, (state) => {
         state.status = 'loading';
+        state.error = null;
       })
       .addCase(fetchDoctorAvailability.fulfilled, (state, action) => {
         state.status = 'succeeded';
@@ -236,6 +331,7 @@ const doctorSlice = createSlice({
       // Fetch slots
       .addCase(fetchDoctorSlots.pending, (state) => {
         state.status = 'loading';
+        state.error = null;
       })
       .addCase(fetchDoctorSlots.fulfilled, (state, action) => {
         state.status = 'succeeded';
@@ -253,6 +349,7 @@ const doctorSlice = createSlice({
       // Update schedule
       .addCase(updateDoctorSchedule.pending, (state) => {
         state.status = 'loading';
+        state.error = null;
       })
       .addCase(updateDoctorSchedule.fulfilled, (state, action) => {
         state.status = 'succeeded';
@@ -266,6 +363,7 @@ const doctorSlice = createSlice({
       // Create leave
       .addCase(createDoctorLeave.pending, (state) => {
         state.status = 'loading';
+        state.error = null;
       })
       .addCase(createDoctorLeave.fulfilled, (state, action) => {
         state.status = 'succeeded';
@@ -279,6 +377,7 @@ const doctorSlice = createSlice({
       // Delete leave
       .addCase(deleteDoctorLeave.pending, (state) => {
         state.status = 'loading';
+        state.error = null;
       })
       .addCase(deleteDoctorLeave.fulfilled, (state, action) => {
         state.status = 'succeeded';
@@ -294,6 +393,7 @@ const doctorSlice = createSlice({
       // Upload document
       .addCase(uploadDoctorDocument.pending, (state) => {
         state.status = 'loading';
+        state.error = null;
       })
       .addCase(uploadDoctorDocument.fulfilled, (state, action) => {
         state.status = 'succeeded';
@@ -307,6 +407,7 @@ const doctorSlice = createSlice({
       // Fetch documents
       .addCase(fetchDoctorDocuments.pending, (state) => {
         state.status = 'loading';
+        state.error = null;
       })
       .addCase(fetchDoctorDocuments.fulfilled, (state, action) => {
         state.status = 'succeeded';
@@ -315,12 +416,27 @@ const doctorSlice = createSlice({
       .addCase(fetchDoctorDocuments.rejected, (state, action) => {
         state.status = 'failed';
         state.error = action.payload?.message || 'Failed to fetch documents';
+      })
+      
+      // Complete profile
+      .addCase(completeDoctorProfile.pending, (state) => {
+        state.status = 'loading';
+        state.error = null;
+      })
+      .addCase(completeDoctorProfile.fulfilled, (state) => {
+        state.status = 'succeeded';
+      })
+      .addCase(completeDoctorProfile.rejected, (state, action) => {
+        state.status = 'failed';
+        state.error = action.payload?.message || 'Failed to complete profile';
       });
   },
 });
 
+// Actions
 export const { clearDoctorData } = doctorSlice.actions;
 
+// Selectors
 export const selectAllDoctors = (state) => state.doctor.doctors;
 export const selectDoctorSpecialities = (state) => state.doctor.specialities;
 export const selectDoctorLocations = (state) => state.doctor.locations;

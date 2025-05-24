@@ -1,21 +1,40 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useDispatch, useSelector } from 'react-redux';
 import { Card, Row, Col, Button, Container, Alert, Badge, Spinner, ProgressBar } from 'react-bootstrap';
-import ApiService from '../services/api';
-import axios from 'axios';
-import moment from 'moment';
 import { Calendar, momentLocalizer } from 'react-big-calendar';
+import moment from 'moment';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
+
+// Redux selectors and actions
+import { selectCurrentUser, logout } from '../redux/slices/authSlice';
+import { 
+  fetchUserProfile, 
+  selectUserProfile, 
+  selectUserStatus, 
+  selectUserError 
+} from '../redux/slices/userSlice';
+import { 
+  fetchPatientAppointments, 
+  selectPatientAppointments, 
+  selectPatientStatus 
+} from '../redux/slices/patientSlice';
 
 const localizer = momentLocalizer(moment);
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [appointments, setAppointments] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const dispatch = useDispatch();
+  
+  // Get data from Redux store
+  const user = useSelector(selectCurrentUser);
+  const profile = useSelector(selectUserProfile);
+  const userStatus = useSelector(selectUserStatus);
+  const userError = useSelector(selectUserError);
+  const appointments = useSelector(selectPatientAppointments);
+  const appointmentStatus = useSelector(selectPatientStatus);
+  
+  // Local state for derived data
   const [stats, setStats] = useState({
     total: 0,
     confirmed: 0,
@@ -29,54 +48,27 @@ const Dashboard = () => {
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [nextAppointment, setNextAppointment] = useState(null);
 
+  // Check loading states
+  const isLoading = userStatus === 'loading' || appointmentStatus === 'loading';
+
   useEffect(() => {
-    fetchDashboardData();
-  }, []);
-
-  const fetchDashboardData = async () => {
-    try {
-      setLoading(true);
-      const userData = JSON.parse(localStorage.getItem('user') || '{}');
-      setUser(userData);
-
-      // Fetch profile data based on role
-      let profileResponse;
-      if (userData.role === 'patient') {
-        profileResponse = await axios.get('http://localhost:8000/api/patient/profile', {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-        });
-      } else if (userData.role === 'medecin') {
-        profileResponse = await axios.get('http://localhost:8000/api/doctor/profile', {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-        });
-      }
-      
-      if (profileResponse) {
-        setProfile(profileResponse.data);
-      }
-
-      // Fetch appointments
-      let appointmentsData = [];
-      if (userData.role === 'patient') {
-        const response = await ApiService.getPatientAppointments(userData.id);
-        appointmentsData = response.data.data || [];
-      } else if (userData.role === 'medecin') {
-        const response = await ApiService.getAppointments(userData.id);
-        appointmentsData = response.data.data || [];
-      }
-      
-      setAppointments(appointmentsData);
-      calculateStats(appointmentsData);
-      prepareCalendarEvents(appointmentsData, userData.role);
-      findNextAppointment(appointmentsData);
-      
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-      setError('Failed to load dashboard data');
-    } finally {
-      setLoading(false);
+    // Fetch profile data
+    dispatch(fetchUserProfile());
+    
+    // Fetch appointments if user is available
+    if (user?.id) {
+      dispatch(fetchPatientAppointments(user.id));
     }
-  };
+  }, [dispatch, user?.id]);
+
+  // Process appointments data when it changes
+  useEffect(() => {
+    if (appointments && appointments.length > 0) {
+      calculateStats(appointments);
+      prepareCalendarEvents(appointments, user?.role);
+      findNextAppointment(appointments);
+    }
+  }, [appointments, user?.role]);
 
   const calculateStats = (appointmentsData) => {
     const now = moment();
@@ -132,16 +124,11 @@ const Dashboard = () => {
 
   const getStatusBadgeClass = (status) => {
     switch (status) {
-      case 'confirmé':
-        return 'success';
-      case 'en_attente':
-        return 'warning';
-      case 'annulé':
-        return 'danger';
-      case 'terminé':
-        return 'secondary';
-      default:
-        return 'light';
+      case 'confirmé': return 'success';
+      case 'en_attente': return 'warning';
+      case 'annulé': return 'danger';
+      case 'terminé': return 'secondary';
+      default: return 'light';
     }
   };
 
@@ -189,9 +176,20 @@ const Dashboard = () => {
     };
   };
 
-  if (loading) {
+  const handleLogout = () => {
+    dispatch(logout())
+      .unwrap()
+      .then(() => {
+        navigate('/login');
+      })
+      .catch(() => {
+        navigate('/login');
+      });
+  };
+
+  if (isLoading && !profile) {
     return (
-      <Container className="mt-4">
+      <Container className="mt-5">
         <div className="text-center">
           <Spinner animation="border" variant="primary" />
           <p className="mt-3">Loading dashboard...</p>
@@ -206,6 +204,13 @@ const Dashboard = () => {
         <Alert variant="danger">
           Unable to load user data. Please try logging in again.
         </Alert>
+        <Button 
+          variant="primary" 
+          onClick={() => navigate('/login')}
+          className="mt-3"
+        >
+          Go to Login
+        </Button>
       </Container>
     );
   }
@@ -266,9 +271,9 @@ const Dashboard = () => {
         </Col>
       </Row>
 
-      {error && (
+      {userError && (
         <Alert variant="danger" className="mb-4">
-          {error}
+          {userError}
         </Alert>
       )}
 
@@ -427,7 +432,7 @@ const Dashboard = () => {
           </Card>
         </Col>
 
-        {/* Recent Appointments */}
+        {/* Calendar */}
         <Col lg={8}>
           <Card className="h-100">
             <Card.Header className="bg-white">
@@ -450,22 +455,29 @@ const Dashboard = () => {
               </Row>
             </Card.Header>
             <Card.Body style={{ height: '400px' }}>
-              <Calendar
-                localizer={localizer}
-                events={calendarEvents}
-                startAccessor="start"
-                endAccessor="end"
-                style={{ height: '100%' }}
-                eventPropGetter={eventStyleGetter}
-                views={['month', 'week', 'day']}
-                defaultView="week"
-                popup
-                onSelectEvent={(event) => {
-                  if (user.role === 'medecin') {
-                    navigate(`/doctor/${user.id}/appointments`);
-                  }
-                }}
-              />
+              {isLoading ? (
+                <div className="text-center my-5">
+                  <Spinner animation="border" variant="primary" />
+                  <p className="mt-2">Loading calendar data...</p>
+                </div>
+              ) : (
+                <Calendar
+                  localizer={localizer}
+                  events={calendarEvents}
+                  startAccessor="start"
+                  endAccessor="end"
+                  style={{ height: '100%' }}
+                  eventPropGetter={eventStyleGetter}
+                  views={['month', 'week', 'day']}
+                  defaultView="week"
+                  popup
+                  onSelectEvent={(event) => {
+                    if (user.role === 'medecin') {
+                      navigate(`/doctor/${user.id}/appointments`);
+                    }
+                  }}
+                />
+              )}
             </Card.Body>
           </Card>
         </Col>
@@ -482,7 +494,12 @@ const Dashboard = () => {
               </h5>
             </Card.Header>
             <Card.Body>
-              {appointments
+              {isLoading ? (
+                <div className="text-center py-4">
+                  <Spinner animation="border" variant="primary" />
+                  <p className="mt-2">Loading appointments...</p>
+                </div>
+              ) : appointments
                 .filter(apt => 
                   moment(apt.date_heure).isAfter(moment()) && 
                   apt.statut !== 'annulé' && 
