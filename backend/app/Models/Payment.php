@@ -1,4 +1,5 @@
 <?php
+// app/Models/Payment.php - Update the existing one
 
 namespace App\Models;
 

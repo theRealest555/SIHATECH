@@ -4,52 +4,63 @@ namespace App\Services;
 
 use App\Models\Payment;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 
 class PaymentService
 {
-    public function processPayment(array $data): array
-    {
-        $transactionId = $this->generateTransactionId();
+    // Add error handling and better transaction management:
 
+public function processPayment(array $data): array
+{
+    $transactionId = $this->generateTransactionId();
+
+    try {
         // Create payment record
         $payment = Payment::create([
             'user_id' => $data['user_id'],
             'user_subscription_id' => $data['subscription_id'] ?? null,
             'transaction_id' => $transactionId,
             'amount' => $data['amount'],
-            'currency' => $data['currency'],
+            'currency' => $data['currency'] ?? 'MAD',
             'status' => 'pending',
             'payment_method' => $data['payment_method'],
-            'payment_data' => $data['payment_data']
+            'payment_data' => $data['payment_data'] ?? []
         ]);
 
-        try {
-            $result = $this->processSpecificPayment($data['payment_method']);
+        $result = $this->processSpecificPayment($data['payment_method']);
 
-            if ($result['success']) {
-                $payment->update(['status' => 'completed']);
-                return [
-                    'success' => true,
-                    'payment' => $payment,
-                    'transaction_id' => $transactionId
-                ];
-            } else {
-                $payment->update(['status' => 'failed']);
-                return [
-                    'success' => false,
-                    'error' => $result['error'],
-                    'payment' => $payment
-                ];
-            }
-        } catch (\Exception $e) {
+        if ($result['success']) {
+            $payment->update(['status' => 'completed']);
+            return [
+                'success' => true,
+                'payment' => $payment,
+                'transaction_id' => $transactionId
+            ];
+        } else {
             $payment->update(['status' => 'failed']);
             return [
                 'success' => false,
-                'error' => $e->getMessage(),
+                'error' => $result['error'],
                 'payment' => $payment
             ];
         }
+    } catch (\Exception $e) {
+        if (isset($payment)) {
+            $payment->update(['status' => 'failed']);
+        }
+
+        Log::error('Payment processing failed', [
+            'error' => $e->getMessage(),
+            'data' => $data
+        ]);
+
+        return [
+            'success' => false,
+            'error' => $e->getMessage(),
+            'payment' => $payment ?? null
+        ];
     }
+}
 
     private function processSpecificPayment(string $method): array
     {
@@ -100,11 +111,11 @@ class PaymentService
     {
         // Simulate Stripe integration
         $success = rand(0, 1);
-    
+
         if ($success) {
             return ['success' => true, 'reference' => 'STR_' . Str::random(10)];
         }
-    
+
         return ['success' => false, 'error' => 'Échec du paiement Stripe'];
     }
 

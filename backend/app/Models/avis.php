@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Avis extends Model
 {
+    protected $table = 'reviews'; // Add this line
+
     protected $fillable = [
         'patient_id',
         'doctor_id',
@@ -34,7 +36,7 @@ class Avis extends Model
 
     public function appointment(): BelongsTo
     {
-        return $this->belongsTo(rendezvous::class);
+        return $this->belongsTo(Rendezvous::class, 'appointment_id');
     }
 
     public function moderator(): BelongsTo

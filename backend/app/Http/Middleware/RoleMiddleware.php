@@ -1,4 +1,5 @@
 <?php
+// app/Http/Middleware/RoleMiddleware.php
 
 namespace App\Http\Middleware;
 
@@ -9,27 +10,26 @@ use Illuminate\Support\Facades\Log;
 
 class RoleMiddleware
 {
-    /**
-     * Handle an incoming request.
-     *
-     * @param  \Closure(\Illuminate\Http\Request): (\Symfony\Component\HttpFoundation\Response)  $next
-     */
     public function handle(Request $request, Closure $next, string $role): Response
     {
-        // Get the authenticated user, checking both web session and API token
-        $user = $request->user() ?: auth()->guard('sanctum')->user();
-        
-        // Log for debugging purposes
+        $user = $request->user();
+
         Log::info('RoleMiddleware Check', [
-            'user' => $user ? $user->toArray() : null,
-            'role' => $role,
+            'user_id' => $user ? $user->id : null,
             'user_role' => $user ? $user->role : 'no role',
-            'token' => $request->bearerToken(),
+            'required_role' => $role,
+            'user_status' => $user ? $user->status : 'no status',
         ]);
 
-        if (!$user || $user->role !== $role) {
+        if (!$user) {
             return response()->json([
-                'message' => 'Unauthorized. Access denied.'
+                'message' => 'Authentication required.'
+            ], 401);
+        }
+
+        if ($user->role !== $role) {
+            return response()->json([
+                'message' => "Access denied. Required role: {$role}, your role: {$user->role}"
             ], 403);
         }
 

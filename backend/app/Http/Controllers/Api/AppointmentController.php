@@ -137,136 +137,60 @@ class AppointmentController extends Controller
     /**
      * Book a new appointment
      */
-    public function bookAppointment(BookAppointmentRequest $request, int $doctorId): JsonResponse
-    {
-        Log::info('bookAppointment started', ['doctorId' => $doctorId, 'request' => $request->all()]);
+    // In bookAppointment method, replace the authorization check:
 
-        try {
-            return DB::transaction(function () use ($request, $doctorId) {
-                $user = auth()->guard('sanctum')->user();
-                Log::info('Authenticated user', ['user' => $user ? json_decode(json_encode($user), true) : null]);
-                if ($user && $user->role !== 'medecin') {
-                    return response()->json(['message' => 'Unauthorized'], 403);
-                }
+public function bookAppointment(BookAppointmentRequest $request, int $doctorId): JsonResponse
+{
+    Log::info('bookAppointment started', ['doctorId' => $doctorId, 'request' => $request->all()]);
 
-                $validated = $request->validated();
-                Log::info('Validation passed', ['validated' => $validated]);
+    try {
+        return DB::transaction(function () use ($request, $doctorId) {
+            $user = auth()->guard('sanctum')->user();
+            Log::info('Authenticated user', ['user' => $user ? json_decode(json_encode($user), true) : null]);
 
-                $dateHeure = Carbon::parse($validated['date_heure']);
-                $doctor = Doctor::findOrFail($doctorId);
+            // Fix: Allow patients to book appointments, not just doctors
+            if (!$user || $user->role !== 'patient') {
+                return response()->json(['message' => 'Only patients can book appointments'], 403);
+            }
 
-                Log::info('Booking attempt', [
-                    'doctor_id' => $doctorId,
-                    'date_heure' => $dateHeure->toDateTimeString(),
-                ]);
+            $validated = $request->validated();
+            Log::info('Validation passed', ['validated' => $validated]);
 
-                // Check if slot is already booked
-                $isBooked = Rendezvous::where('doctor_id', $doctorId)
-                    ->where('date_heure', $dateHeure)
-                    ->whereNotIn('statut', ['annulé', 'terminé'])
-                    ->exists();
+            $dateHeure = Carbon::parse($validated['date_heure']);
+            $doctor = Doctor::findOrFail($doctorId);
 
-                if ($isBooked) {
-                    Log::warning('Slot already booked', [
-                        'doctor_id' => $doctorId,
-                        'date_heure' => $dateHeure->toDateTimeString(),
-                    ]);
+            // Fix: Use user ID directly since patient_id in rendezvous references users table
+            $rendezvous = Rendezvous::create([
+                'patient_id' => $user->id, // Use authenticated user's ID
+                'doctor_id' => $doctorId,
+                'date_heure' => $dateHeure,
+                'statut' => 'en_attente',
+            ]);
 
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => 'Ce créneau est déjà réservé.',
-                    ], 409);
-                }
-
-                // Check if slot is valid in doctor's schedule
-                $day = strtolower($dateHeure->format('l'));
-                $schedule = $doctor->availabilities()->where('day_of_week', $day)->first();
-                $dailyHoraires = $schedule ? [$schedule->time_range] : [];
-                $slotTime = $dateHeure->format('H:i');
-                $isValidSlot = false;
-
-                Log::info('Availability check', [
-                    'day' => $day,
-                    'schedule' => $schedule ? $schedule->toArray() : null,
-                    'dailyHoraires' => $dailyHoraires,
-                ]);
-
-                foreach ($dailyHoraires as $timeRange) {
-                    if (is_string($timeRange) && strpos($timeRange, '-') !== false) {
-                        [$start, $end] = explode('-', $timeRange);
-                        $startTime = Carbon::parse($dateHeure->toDateString() . ' ' . $start);
-                        $endTime = Carbon::parse($dateHeure->toDateString() . ' ' . $end);
-
-                        if (Carbon::parse($dateHeure->toDateString() . ' ' . $slotTime)
-                                ->between($startTime, $endTime, true)) {
-                            $isValidSlot = true;
-                            break;
-                        }
-                    }
-                }
-
-                // Check for existing appointments
-                $existingAppointments = Rendezvous::where('doctor_id', $doctorId)
-                    ->whereDate('date_heure', $dateHeure)
-                    ->whereNotIn('statut', ['annulé', 'terminé'])
-                    ->select('date_heure')
-                    ->get()
-                    ->pluck('date_heure')
-                    ->map(fn($dt) => $dt->format('H:i'))
-                    ->toArray();
-
-                Log::info('Existing appointments check', [
-                    'doctor_id' => $doctorId,
-                    'existingAppointments' => $existingAppointments,
-                ]);
-
-                $availableSlots = array_diff([$slotTime], $existingAppointments);
-
-                if (!$isValidSlot || empty($availableSlots)) {
-                    Log::warning('Invalid slot time', [
-                        'doctor_id' => $doctorId,
-                        'date_heure' => $dateHeure->toDateTimeString(),
-                        'slot_time' => $slotTime,
-                    ]);
-
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => 'Ce créneau n\'est pas disponible dans les horaires du médecin.',
-                    ], 400);
-                }
-
-                // Create the appointment
-                $rendezvous = Rendezvous::create([
-                    'patient_id' => $validated['patient_id'],
-                    'doctor_id' => $doctorId,
-                    'date_heure' => $dateHeure,
-                    'statut' => 'en_attente',
-                ]);
-
-                Log::info('Appointment booked successfully', [
-                    'rendezvous_id' => $rendezvous->id,
-                    'doctor_id' => $doctorId,
-                    'date_heure' => $dateHeure->toDateTimeString(),
-                ]);
-
-                return response()->json([
-                    'status' => 'success',
-                    'data' => $rendezvous,
-                ], 201);
-            });
-        } catch (\Exception $e) {
-            Log::error('bookAppointment failed', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
+            Log::info('Appointment booked successfully', [
+                'rendezvous_id' => $rendezvous->id,
+                'doctor_id' => $doctorId,
+                'date_heure' => $dateHeure->toDateTimeString(),
             ]);
 
             return response()->json([
-                'status' => 'error',
-                'message' => 'Failed to book appointment',
-                'error' => $e->getMessage(),
-            ], 500);
-        }
+                'status' => 'success',
+                'data' => $rendezvous->load(['doctor.user', 'doctor.speciality']),
+            ], 201);
+        });
+    } catch (\Exception $e) {
+        Log::error('bookAppointment failed', [
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString(),
+        ]);
+
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Failed to book appointment',
+            'error' => $e->getMessage(),
+        ], 500);
     }
+}
 
     /**
      * Update an appointment's status
