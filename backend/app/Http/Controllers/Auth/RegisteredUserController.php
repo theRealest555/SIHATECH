@@ -11,6 +11,7 @@ use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rules;
 use Illuminate\Validation\ValidationException;
 
@@ -18,8 +19,6 @@ class RegisteredUserController extends Controller
 {
     /**
      * Handle an incoming registration request.
-     *
-     * @throws \Illuminate\Validation\ValidationException
      */
     public function store(Request $request): JsonResponse
     {
@@ -27,12 +26,12 @@ class RegisteredUserController extends Controller
             $request->validate([
                 'nom' => ['required', 'string', 'max:50'],
                 'prenom' => ['required', 'string', 'max:50'],
-                'email' => ['required', 'string', 'email', 'max:50', 'unique:'.User::class],
+                'email' => ['required', 'string', 'email', 'max:50', 'unique:users'],
                 'password' => ['required', 'confirmed', Rules\Password::defaults()],
                 'telephone' => ['nullable', 'string', 'max:20'],
                 'role' => ['required', 'in:patient,medecin,admin'],
-                'username' => ['nullable', 'string', 'max:50', 'unique:'.User::class],
-                'photo' => ['nullable', 'image', 'max:2048'],
+                'username' => ['nullable', 'string', 'max:50', 'unique:users'],
+                'photo' => ['nullable', 'string', 'max:255'],
                 'adresse' => ['nullable', 'string', 'max:255'],
                 'sexe' => ['nullable', 'string', 'in:homme,femme'],
                 'date_de_naissance' => ['nullable', 'date', 'before:today'],
@@ -49,6 +48,11 @@ class RegisteredUserController extends Controller
                 'telephone' => $request->telephone,
                 'role' => $request->role,
                 'status' => 'actif',
+                'username' => $request->username,
+                'photo' => $request->photo,
+                'adresse' => $request->adresse,
+                'sexe' => $request->sexe,
+                'date_de_naissance' => $request->date_de_naissance,
             ]);
 
             // Create role-specific profile
@@ -65,21 +69,32 @@ class RegisteredUserController extends Controller
             } elseif ($request->role === 'admin') {
                 Admin::create([
                     'user_id' => $user->id,
+                    'admin_status' => 0, // Inactive by default
                 ]);
             }
 
             // Trigger the Registered event which sends verification email
             event(new Registered($user));
 
-            // Explicitly send verification email
-            $user->sendEmailVerificationNotification();
+            // Log the user in
+            Auth::login($user);
 
             // Generate API token with role as ability
             $token = $user->createToken('auth-token', [$user->role])->plainTextToken;
 
             return response()->json([
                 'message' => 'Registration successful. Please check your email to verify your account.',
-                'user' => $user,
+                'user' => [
+                    'id' => $user->id,
+                    'nom' => $user->nom,
+                    'prenom' => $user->prenom,
+                    'email' => $user->email,
+                    'role' => $user->role,
+                    'status' => $user->status,
+                    'email_verified_at' => $user->email_verified_at,
+                    'photo' => $user->photo,
+                    'telephone' => $user->telephone,
+                ],
                 'token' => $token
             ], 201);
         } catch (ValidationException $e) {
@@ -89,7 +104,7 @@ class RegisteredUserController extends Controller
             ], 422);
         } catch (\Exception $e) {
             return response()->json([
-                'message' => 'An error occurred during registration',
+                'message' => 'Registration failed',
                 'error' => $e->getMessage(),
             ], 500);
         }

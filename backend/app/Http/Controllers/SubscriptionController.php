@@ -1,5 +1,5 @@
 <?php
-// app/Http/Controllers/SubscriptionController.php
+
 namespace App\Http\Controllers;
 
 use App\Models\Abonnement;
@@ -9,6 +9,7 @@ use App\Services\PaymentService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Auth;
 
 class SubscriptionController extends Controller
 {
@@ -21,6 +22,8 @@ class SubscriptionController extends Controller
 
     public function getPlans(): JsonResponse
     {
+        // Note: This references subscription_plans table, but your migration shows 'abonnements'
+        // Using Abonnement model for now, but you may need to adjust based on your actual table
         $plans = Abonnement::where('is_active', true)->get();
         return response()->json(['data' => $plans]);
     }
@@ -33,10 +36,10 @@ class SubscriptionController extends Controller
             'payment_data' => 'required|array'
         ]);
 
+        $user = Auth::user();
         $plan = Abonnement::findOrFail($request->plan_id);
-        $user = auth()->user();
 
-        // Créer la souscription
+        // Create subscription
         $subscription = UserSubscription::create([
             'user_id' => $user->id,
             'subscription_plan_id' => $plan->id,
@@ -46,7 +49,7 @@ class SubscriptionController extends Controller
             'payment_method' => $request->payment_data
         ]);
 
-        // Traiter le paiement
+        // Process payment
         $paymentResult = $this->paymentService->processPayment([
             'amount' => $plan->price,
             'currency' => 'MAD',
@@ -60,7 +63,7 @@ class SubscriptionController extends Controller
             $subscription->update(['status' => 'active']);
             return response()->json([
                 'message' => 'Abonnement créé avec succès',
-                'subscription' => $subscription->load('Abonnement'),
+                'subscription' => $subscription->load('subscriptionPlan'),
                 'payment' => $paymentResult['payment']
             ]);
         }
@@ -70,10 +73,9 @@ class SubscriptionController extends Controller
             'error' => $paymentResult['error']
         ], 400);
     }
-
     public function cancelSubscription(): JsonResponse
     {
-        $user = auth()->user();
+        $user = Auth::user();
         $subscription = UserSubscription::where('user_id', $user->id)
             ->where('status', 'active')
             ->first();
@@ -89,11 +91,10 @@ class SubscriptionController extends Controller
 
         return response()->json(['message' => 'Abonnement annulé avec succès']);
     }
-
     public function getUserSubscription(): JsonResponse
     {
-        $user = auth()->user();
-        $subscription = UserSubscription::with('Abonnement')
+        $user = Auth::user();
+        $subscription = UserSubscription::with('subscriptionPlan')
             ->where('user_id', $user->id)
             ->where('status', 'active')
             ->first();

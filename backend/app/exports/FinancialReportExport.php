@@ -2,16 +2,15 @@
 
 namespace App\Exports;
 
-use Maatwebsite\Excel\Concerns\FromArray;
-use Maatwebsite\Excel\Concerns\WithHeadings;
+use Illuminate\Support\Collection;
 
-class FinancialReportExport implements FromArray, WithHeadings
+class FinancialReportExport
 {
     protected $payments;
 
     public function __construct($data)
     {
-        $this->payments = $data['payments'];
+        $this->payments = $data['payments'] ?? collect();
     }
 
     public function headings(): array
@@ -28,19 +27,24 @@ class FinancialReportExport implements FromArray, WithHeadings
         ];
     }
 
-    public function array(): array
+    public function collection(): Collection
     {
         return $this->payments->map(function ($payment) {
-            return [
-                $payment->id,
-                optional($payment->user)->name,
-                optional($payment->user)->email,
-                $payment->amount,
-                $payment->payment_method,
-                $payment->status,
-                $payment->created_at->format('Y-m-d'),
-                optional(optional($payment->userSubscription)->Abonnement)->nom ?? 'N/A',
-            ];
-        })->toArray();
+            return collect([
+                $payment->id ?? '',
+                optional($payment->user)->nom ?? 'N/A',
+                optional($payment->user)->email ?? 'N/A',
+                $payment->amount ?? 0,
+                $payment->payment_method ?? 'N/A',
+                $payment->status ?? 'N/A',
+                isset($payment->created_at) ? $payment->created_at->format('Y-m-d') : 'N/A',
+                optional(optional($payment->userSubscription)->subscriptionPlan)->name ?? 'N/A',
+            ]);
+        });
+    }
+
+    public function toArray(): array
+    {
+        return $this->collection()->toArray();
     }
 }

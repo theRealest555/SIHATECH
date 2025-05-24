@@ -1,13 +1,18 @@
 <?php
-// app/Http/Controllers/AdminController.php
-namespace App\Http\Controllers;
 
+namespace App\Http\Controllers\Admin;
+
+use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Avis;
-use App\Models\rendezvous;
+use App\Models\Rendezvous;
 use App\Models\Payment;
+use App\Models\UserSubscription;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Response;
+use Illuminate\Support\Facades\Auth;
+
 
 class AdminController extends Controller
 {
@@ -15,14 +20,16 @@ class AdminController extends Controller
     {
         $stats = [
             'total_users' => User::count(),
-            'total_doctors' => User::where('role', 'doctor')->count(),
+            'total_doctors' => User::where('role', 'medecin')->count(),
             'total_patients' => User::where('role', 'patient')->count(),
             'pending_reviews' => Avis::where('status', 'pending')->count(),
-            'total_appointments' => rendezvous::count(),
+            'total_appointments' => Rendezvous::count(),
             'total_revenue' => Payment::where('status', 'completed')->sum('amount'),
             'recent_registrations' => User::orderBy('created_at', 'desc')->limit(5)->get(),
-            'pending_doctor_verifications' => User::where('role', 'doctor')
-                ->where('verification_status', 'pending')
+            'pending_doctor_verifications' => User::where('role', 'medecin')
+                ->whereHas('doctor', function($query) {
+                    $query->where('is_verified', false);
+                })
                 ->count()
         ];
 
@@ -40,7 +47,8 @@ class AdminController extends Controller
         if ($request->has('search')) {
             $search = $request->search;
             $query->where(function($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
+                $q->where('nom', 'like', "%{$search}%")
+                  ->orWhere('prenom', 'like', "%{$search}%")
                   ->orWhere('email', 'like', "%{$search}%");
             });
         }
@@ -52,7 +60,7 @@ class AdminController extends Controller
     public function updateUserStatus(Request $request, User $user): JsonResponse
     {
         $request->validate([
-            'status' => 'required|in:active,suspended,banned'
+            'status' => 'required|in:actif,inactif,en_attente'
         ]);
 
         $user->update(['status' => $request->status]);
@@ -82,7 +90,7 @@ class AdminController extends Controller
         $review->update([
             'status' => $request->action === 'approve' ? 'approved' : 'rejected',
             'moderated_at' => now(),
-            'moderated_by' => auth()->id()
+            'moderated_by' => Auth::id()
         ]);
 
         return response()->json([
@@ -93,7 +101,7 @@ class AdminController extends Controller
 
     public function exportUserData(Request $request)
     {
-        $format = $request->get('format', 'excel');
+        $format = $request->get('format', 'csv');
         $users = User::with(['userSubscriptions', 'payments'])->get();
 
         if ($format === 'csv') {
@@ -104,12 +112,13 @@ class AdminController extends Controller
 
             $callback = function() use ($users) {
                 $file = fopen('php://output', 'w');
-                fputcsv($file, ['ID', 'Nom', 'Email', 'Rôle', 'Statut', 'Date d\'inscription']);
-                
+                fputcsv($file, ['ID', 'Nom', 'Prénom', 'Email', 'Rôle', 'Statut', 'Date d\'inscription']);
+
                 foreach ($users as $user) {
                     fputcsv($file, [
                         $user->id,
-                        $user->name,
+                        $user->nom,
+                        $user->prenom,
                         $user->email,
                         $user->role,
                         $user->status,
@@ -119,10 +128,10 @@ class AdminController extends Controller
                 fclose($file);
             };
 
-            return response()->stream($callback, 200, $headers);
+            return Response::stream($callback, 200, $headers);
         }
 
-        // Excel export logic here
+        // For Excel format, return JSON response indicating export is being processed
         return response()->json(['message' => 'Export en cours...']);
     }
 }

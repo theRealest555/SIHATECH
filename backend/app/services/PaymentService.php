@@ -11,7 +11,7 @@ class PaymentService
     {
         $transactionId = $this->generateTransactionId();
 
-        // Créer l'enregistrement de paiement
+        // Create payment record
         $payment = Payment::create([
             'user_id' => $data['user_id'],
             'user_subscription_id' => $data['subscription_id'] ?? null,
@@ -24,8 +24,8 @@ class PaymentService
         ]);
 
         try {
-            $result = $this->processSpecificPayment($data['payment_method'], $data);
-            
+            $result = $this->processSpecificPayment($data['payment_method']);
+
             if ($result['success']) {
                 $payment->update(['status' => 'completed']);
                 return [
@@ -51,54 +51,60 @@ class PaymentService
         }
     }
 
-    private function processSpecificPayment(string $method, array $data): array
+    private function processSpecificPayment(string $method): array
     {
+        $result = [];
         switch ($method) {
             case 'cih_pay':
-                return $this->processCIHPay($data);
+                $result = $this->processCIHPay();
+                break;
             case 'paypal':
-                return $this->processPayPal($data);
+                $result = $this->processPayPal();
+                break;
             case 'stripe':
-                return $this->processStripe($data);
+                $result = $this->processStripe();
+                break;
             default:
-                return ['success' => false, 'error' => 'Méthode de paiement non supportée'];
+                $result = ['success' => false, 'error' => 'Méthode de paiement non supportée'];
+                break;
         }
+        return $result;
     }
 
-    private function processCIHPay(array $data): array
+    private function processCIHPay(): array
     {
-        // Simulation de l'intégration CIH Pay
-        // En réalité, vous intégreriez l'API CIH Pay ici
-        $success = rand(0, 1); // Simulation aléatoire
-        
+        // Simulate CIH Pay integration
+        // In reality, you would integrate the CIH Pay API here
+        $success = rand(0, 1); // Random simulation
+
         if ($success) {
             return ['success' => true, 'reference' => 'CIH_' . Str::random(10)];
         }
-        
+
         return ['success' => false, 'error' => 'Échec du paiement CIH Pay'];
     }
 
-    private function processPayPal(array $data): array
+    private function processPayPal(): array
     {
-        // Simulation de l'intégration PayPal
+        // Simulate PayPal integration
         $success = rand(0, 1);
-        
+
         if ($success) {
             return ['success' => true, 'reference' => 'PP_' . Str::random(10)];
         }
-        
+
         return ['success' => false, 'error' => 'Échec du paiement PayPal'];
     }
 
-    private function processStripe(array $data): array
+    private function processStripe(): array
     {
-        // Simulation de l'intégration Stripe
+        // Simulate Stripe integration
         $success = rand(0, 1);
-        
+    
         if ($success) {
             return ['success' => true, 'reference' => 'STR_' . Str::random(10)];
         }
-        
+    
         return ['success' => false, 'error' => 'Échec du paiement Stripe'];
     }
 
@@ -107,36 +113,42 @@ class PaymentService
         return 'TXN_' . now()->format('YmdHis') . '_' . Str::random(6);
     }
 
-    public function handleWebhook(string $provider, array $data): bool
+    public function handleWebhook(string $provider): bool
     {
-        // Gestion des webhooks pour les renouvellements/annulations
+        // Handle webhooks for renewals/cancellations
+        $result = false;
         switch ($provider) {
             case 'cih_pay':
-                return $this->handleCIHWebhook($data);
+                $result = $this->handleCIHWebhook();
+                break;
             case 'paypal':
-                return $this->handlePayPalWebhook($data);
+                $result = $this->handlePayPalWebhook();
+                break;
             case 'stripe':
-                return $this->handleStripeWebhook($data);
+                $result = $this->handleStripeWebhook();
+                break;
             default:
-                return false;
+                $result = false;
+                break;
         }
+        return $result;
     }
 
-    private function handleCIHWebhook(array $data): bool
+    private function handleCIHWebhook(): bool
     {
-        // Logique de gestion des webhooks CIH Pay
+        // Logic for handling CIH Pay webhooks
         return true;
     }
 
-    private function handlePayPalWebhook(array $data): bool
+    private function handlePayPalWebhook(): bool
     {
-        // Logique de gestion des webhooks PayPal
+        // Logic for handling PayPal webhooks
         return true;
     }
 
-    private function handleStripeWebhook(array $data): bool
+    private function handleStripeWebhook(): bool
     {
-        // Logique de gestion des webhooks Stripe
+        // Logic for handling Stripe webhooks
         return true;
     }
 }

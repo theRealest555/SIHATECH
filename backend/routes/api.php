@@ -25,8 +25,9 @@ use App\Http\Controllers\DoctorController;
 |--------------------------------------------------------------------------
 */
 
-// Public Authentication Routes
-Route::group(['prefix' => 'auth'], function () {
+// Guest Routes (No Authentication Required)
+Route::middleware('guest')->group(function () {
+    // Authentication Routes
     Route::post('/register', [RegisteredUserController::class, 'store']);
     Route::post('/login', [AuthenticatedSessionController::class, 'store']);
     Route::post('/admin/login', [AdminAuthController::class, 'login']);
@@ -34,30 +35,22 @@ Route::group(['prefix' => 'auth'], function () {
     Route::post('/reset-password', [NewPasswordController::class, 'store']);
 
     // Social Authentication
-    Route::get('/social/{provider}/redirect', [SocialiteAuthController::class, 'redirect'])
+    Route::get('/auth/social/{provider}/redirect', [SocialiteAuthController::class, 'redirect'])
         ->name('auth.social.redirect');
-    Route::get('/social/{provider}/callback', [SocialiteAuthController::class, 'callback'])
+    Route::get('/auth/social/{provider}/callback', [SocialiteAuthController::class, 'callback'])
         ->name('auth.social.callback');
 });
 
-// Email Verification Routes
+// Email Verification Routes (Signed URLs)
 Route::group(['prefix' => 'email'], function () {
     Route::get('/verify/{id}/{hash}', [VerifyEmailController::class, '__invoke'])
         ->middleware(['signed', 'throttle:6,1'])
         ->name('verification.verify');
     Route::get('/verify/error', [VerifyEmailController::class, 'error'])
         ->name('verification.error');
-    Route::post('/verification-notification', [EmailVerificationNotificationController::class, 'store'])
-        ->middleware(['auth:sanctum', 'throttle:6,1'])
-        ->name('verification.send');
-    Route::get('/verify/check', function (Request $request) {
-        return response()->json([
-            'verified' => $request->user() && $request->user()->hasVerifiedEmail(),
-        ]);
-    })->middleware(['auth:sanctum']);
 });
 
-// Public Doctor Routes
+// Public Doctor Routes (No Auth Required)
 Route::group(['prefix' => 'doctors'], function () {
     Route::get('/', [DoctorController::class, 'index']);
     Route::get('/specialities', [DoctorController::class, 'specialities']);
@@ -70,19 +63,34 @@ Route::group(['prefix' => 'doctors'], function () {
 // Public Appointment Routes
 Route::get('/appointments', [AppointmentController::class, 'getAppointments']);
 
-// Protected Routes (All Authenticated Users)
+// Authenticated Routes (Sanctum Protected)
 Route::middleware(['auth:sanctum'])->group(function () {
+    // Basic Auth Routes
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy']);
     Route::get('/user', function (Request $request) {
-        return $request->user();
+        return response()->json([
+            'user' => $request->user(),
+            'role' => $request->user()->role ?? null
+        ]);
+    });
+
+    // Email Verification for Authenticated Users
+    Route::post('/email/verification-notification', [EmailVerificationNotificationController::class, 'store'])
+        ->middleware(['throttle:6,1'])
+        ->name('verification.send');
+    Route::get('/email/verify/check', function (Request $request) {
+        return response()->json([
+            'verified' => $request->user() && $request->user()->hasVerifiedEmail(),
+        ]);
     });
 
     // Doctor profile completion (after social login)
-    Route::middleware(['abilities:medecin'])->post('/doctor/complete-profile',
-        [DoctorProfileController::class, 'completeProfile']);
+    Route::post('/doctor/complete-profile', [DoctorProfileController::class, 'completeProfile'])
+        ->middleware(['role:medecin']);
 
-    // Routes requiring verified email
+    // Routes requiring verified email and active status
     Route::middleware(['verified', 'active.user'])->group(function () {
+
         // Patient Routes
         Route::group(['prefix' => 'patient', 'middleware' => 'role:patient'], function () {
             Route::get('/profile', [PatientProfileController::class, 'show']);
@@ -114,20 +122,22 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
             // Verified Doctor Routes
             Route::middleware(['verified.doctor'])->group(function () {
-                Route::post('/schedule', [AvailabilityController::class, 'updateSchedule']);
-                Route::post('/leaves', [AvailabilityController::class, 'createLeave']);
-                Route::delete('/leaves/{leave}', [AvailabilityController::class, 'deleteLeave']);
+                Route::put('/{doctor}/schedule', [AvailabilityController::class, 'updateSchedule']);
+                Route::post('/{doctor}/leaves', [AvailabilityController::class, 'createLeave']);
+                Route::delete('/{doctor}/leaves/{leave}', [AvailabilityController::class, 'deleteLeave']);
             });
         });
 
         // Admin Routes
         Route::group(['prefix' => 'admin', 'middleware' => 'role:admin'], function () {
+            // User Management
             Route::get('/users', [UserController::class, 'index']);
             Route::post('/users/admin', [UserController::class, 'storeAdmin']);
             Route::get('/users/{id}', [UserController::class, 'show']);
             Route::put('/users/{id}/status', [UserController::class, 'updateStatus']);
             Route::put('/users/{id}/password', [UserController::class, 'resetPassword']);
             Route::delete('/users/{id}', [UserController::class, 'destroy']);
+            Route::put('/admins/{id}/status', [UserController::class, 'updateAdminStatus']);
 
             // Doctor Verification
             Route::get('/doctors/pending', [DoctorVerificationController::class, 'pendingDoctors']);
@@ -139,4 +149,9 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::post('/doctors/{id}/revoke', [DoctorVerificationController::class, 'revokeVerification']);
         });
     });
+});
+
+// Appointment booking with specific doctor (requires auth)
+Route::middleware(['auth:sanctum', 'verified', 'active.user'])->group(function () {
+    Route::post('/doctors/{doctorId}/appointments', [AppointmentController::class, 'bookAppointment']);
 });

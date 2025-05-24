@@ -2,24 +2,33 @@
 
 use Laravel\Sanctum\Sanctum;
 
+$frontendUrl = env('FRONTEND_URL');
+$frontendUrlAppend = '';
+if ($frontendUrl) {
+    $parsedUrl = parse_url($frontendUrl);
+    $host = $parsedUrl['host'] ?? '';
+    $port = $parsedUrl['port'] ?? null;
+    $frontendUrlAppend = ',' . $host . ($port ? ':' . $port : '');
+}
+
 return [
 
     /*
     |--------------------------------------------------------------------------
     | Stateful Domains
-    |--------------------------------------------------------------------------
-    |
-    | Requests from the following domains / hosts will receive stateful API
-    | authentication cookies. Typically, these should include your local
+        '%s%s%s',
+        'localhost,localhost:3000,localhost:3001,127.0.0.1,127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:8000,::1',
+        Sanctum::currentApplicationUrlWithPort(),
+        $frontendUrlAppend
     | and production domains which access your API via a frontend SPA.
     |
     */
 
     'stateful' => explode(',', env('SANCTUM_STATEFUL_DOMAINS', sprintf(
         '%s%s%s',
-        'localhost,localhost:3000,127.0.0.1,127.0.0.1:3000,127.0.0.1:8000,::1',
+        'localhost,localhost:3000,localhost:3001,127.0.0.1,127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:8000,::1',
         Sanctum::currentApplicationUrlWithPort(),
-        env('FRONTEND_URL') ? ','.parse_url(env('FRONTEND_URL'), PHP_URL_HOST).(parse_url(env('FRONTEND_URL'), PHP_URL_PORT) ? ':'.parse_url(env('FRONTEND_URL'), PHP_URL_PORT) : '') : ''
+        $frontendUrlAppend
     ))),
 
     /*
@@ -47,7 +56,7 @@ return [
     |
     */
 
-    'expiration' => 60 * 24 * 7, // 7 days expiration
+    'expiration' => env('SANCTUM_TOKEN_EXPIRATION', 60 * 24 * 7), // 7 days
 
     /*
     |--------------------------------------------------------------------------
@@ -56,7 +65,7 @@ return [
     |
     | Sanctum can prefix new tokens to prevent collisions if multiple Sanctum
     | using applications exist within a single application. You may change
-    | the token prefix from the default 'example'.
+    | the token prefix from the default.
     |
     */
 
@@ -75,7 +84,7 @@ return [
 
     'middleware' => [
         'authenticate_session' => Laravel\Sanctum\Http\Middleware\AuthenticateSession::class,
-        'encrypt_cookies' => Illuminate\Cookie\Middleware\EncryptCookies::class,
+        'encrypt_cookies' => App\Http\Middleware\EncryptCookies::class,
         'validate_csrf_token' => Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class,
     ],
 
