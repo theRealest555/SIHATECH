@@ -3,13 +3,17 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Http\Requests\SearchDoctorsAdvancedRequest;
+use App\Http\Requests\Doctor\UpdateDoctorLanguagesRequest;
 use App\Models\Doctor;
 use App\Models\Speciality;
 use App\Models\Leave;
 use App\Models\Availability;
+use App\Models\Language;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 class DoctorController extends Controller
 {
@@ -18,12 +22,21 @@ class DoctorController extends Controller
      */
     public function index(): JsonResponse
     {
-        $doctors = Doctor::with(['user', 'speciality'])
+        $doctors = Doctor::with(['user', 'speciality', 'languages'])
+            ->verified()
+            ->active()
             ->get()
             ->map(fn($doctor) => [
                 'id' => $doctor->id,
-                'name' => $doctor->user ? ($doctor->user->prenom . ' ' . $doctor->user->nom) : 'N/A',
+                'name' => $doctor->full_name,
                 'speciality' => $doctor->speciality ? $doctor->speciality->nom : 'N/A',
+                'location' => $doctor->user ? $doctor->user->adresse : 'N/A',
+                'languages' => $doctor->languages->pluck('nom'),
+                'rating' => [
+                    'average' => $doctor->average_rating,
+                    'total_reviews' => $doctor->total_reviews,
+                ],
+                'photo' => $doctor->user ? $doctor->user->photo : null,
             ]);
 
         return response()->json(['data' => $doctors]);
@@ -34,8 +47,17 @@ class DoctorController extends Controller
      */
     public function specialities(): JsonResponse
     {
-        $specialities = Speciality::pluck('nom');
+        $specialities = Speciality::orderBy('nom')->get();
         return response()->json(['data' => $specialities]);
+    }
+
+    /**
+     * Get all languages.
+     */
+    public function languages(): JsonResponse
+    {
+        $languages = Language::orderBy('nom')->get();
+        return response()->json(['data' => $languages]);
     }
 
     /**
@@ -44,42 +66,174 @@ class DoctorController extends Controller
     public function locations(): JsonResponse
     {
         $locations = Doctor::with('user')
+            ->verified()
+            ->active()
             ->distinct('user.adresse')
             ->get()
             ->pluck('user.adresse')
             ->filter()
+            ->unique()
             ->values();
 
         return response()->json(['data' => $locations]);
     }
 
     /**
-     * Search for doctors with filters.
+     * Advanced search for doctors with filters.
      */
-    public function search(Request $request): JsonResponse
+    public function search(SearchDoctorsAdvancedRequest $request): JsonResponse
     {
-        $speciality = $request->query('speciality');
-        $location = $request->query('location');
-        $date = $request->query('date', now()->toDateString());
+        $validated = $request->validated();
+        $perPage = $validated['per_page'] ?? 15;
+        $sortBy = $validated['sort_by'] ?? 'average_rating';
+        $sortOrder = $validated['sort_order'] ?? 'desc';
 
         $query = Doctor::query()
-            ->select('doctors.*')
-            ->with(['user', 'speciality'])
-            ->when($speciality, fn($q) => $q->whereHas('speciality', fn($q) => $q->where('nom', $speciality)))
-            ->when($location, fn($q) => $q->whereHas('user', fn($q) => $q->where('adresse', $location)));
+            ->with(['user', 'speciality', 'languages'])
+            ->verified()
+            ->active()
+            ->search($validated);
 
-        $doctors = $query->get()->map(function ($doctor) use ($date) {
-            $slots = $this->getAvailableSlots($doctor, $date);
-            return [
+        // Apply sorting
+        switch ($sortBy) {
+            case 'rating':
+                $query->orderBy('average_rating', $sortOrder);
+                break;
+            case 'name':
+                $query->join('users', 'doctors.user_id', '=', 'users.id')
+                    ->orderBy('users.nom', $sortOrder)
+                    ->select('doctors.*');
+                break;
+            case 'created_at':
+                $query->orderBy('created_at', $sortOrder);
+                break;
+            default:
+                $query->orderBy('average_rating', 'desc');
+        }
+
+        // Get paginated results
+        $doctors = $query->paginate($perPage);
+
+        // Transform the results
+        $doctors->getCollection()->transform(function ($doctor) use ($validated) {
+            $doctorData = [
                 'id' => $doctor->id,
-                'name' => $doctor->user ? ($doctor->user->prenom . ' ' . $doctor->user->nom) : 'N/A',
+                'name' => $doctor->full_name,
                 'speciality' => $doctor->speciality ? $doctor->speciality->nom : 'N/A',
                 'location' => $doctor->user ? $doctor->user->adresse : 'N/A',
-                'available_slots' => $slots,
+                'languages' => $doctor->languages->pluck('nom'),
+                'rating' => [
+                    'average' => $doctor->average_rating,
+                    'total_reviews' => $doctor->total_reviews,
+                    'formatted' => $doctor->formatted_rating,
+                ],
+                'photo' => $doctor->user ? $doctor->user->photo : null,
+                'description' => $doctor->description,
+                'is_verified' => $doctor->is_verified,
             ];
+
+            // If date is provided, add available slots for that date
+            if (!empty($validated['date'])) {
+                $doctorData['available_slots'] = $this->getAvailableSlots($doctor, $validated['date']);
+            }
+
+            return $doctorData;
         });
 
-        return response()->json(['data' => $doctors]);
+        // Add search metadata
+        $metadata = [
+            'filters_applied' => array_filter([
+                'speciality_id' => $validated['speciality_id'] ?? null,
+                'location' => $validated['location'] ?? null,
+                'language_ids' => $validated['language_ids'] ?? null,
+                'min_rating' => $validated['min_rating'] ?? null,
+                'date' => $validated['date'] ?? null,
+            ]),
+            'sort' => [
+                'by' => $sortBy,
+                'order' => $sortOrder,
+            ],
+        ];
+
+        return response()->json([
+            'data' => $doctors->items(),
+            'meta' => array_merge($metadata, [
+                'current_page' => $doctors->currentPage(),
+                'from' => $doctors->firstItem(),
+                'last_page' => $doctors->lastPage(),
+                'per_page' => $doctors->perPage(),
+                'to' => $doctors->lastItem(),
+                'total' => $doctors->total(),
+            ]),
+            'links' => [
+                'first' => $doctors->url(1),
+                'last' => $doctors->url($doctors->lastPage()),
+                'prev' => $doctors->previousPageUrl(),
+                'next' => $doctors->nextPageUrl(),
+            ],
+        ]);
+    }
+
+    /**
+     * Get a doctor's details.
+     */
+    public function show(int $doctorId): JsonResponse
+    {
+        $doctor = Doctor::with(['user', 'speciality', 'languages', 'documents' => function($query) {
+            $query->where('status', 'approved');
+        }])
+        ->findOrFail($doctorId);
+
+        return response()->json([
+            'data' => [
+                'id' => $doctor->id,
+                'name' => $doctor->full_name,
+                'email' => $doctor->user->email,
+                'phone' => $doctor->user->telephone,
+                'address' => $doctor->user->adresse,
+                'speciality' => $doctor->speciality,
+                'languages' => $doctor->languages,
+                'description' => $doctor->description,
+                'rating' => [
+                    'average' => $doctor->average_rating,
+                    'total_reviews' => $doctor->total_reviews,
+                    'formatted' => $doctor->formatted_rating,
+                ],
+                'schedule' => $doctor->horaires,
+                'is_verified' => $doctor->is_verified,
+                'is_active' => $doctor->is_active,
+                'photo' => $doctor->user->photo,
+                'documents_count' => $doctor->documents->count(),
+            ]
+        ]);
+    }
+
+    /**
+     * Update doctor's languages.
+     */
+    public function updateLanguages(UpdateDoctorLanguagesRequest $request): JsonResponse
+    {
+        $doctor = $request->user()->doctor;
+
+        if (!$doctor) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Doctor profile not found'
+            ], 404);
+        }
+
+        $validated = $request->validated();
+
+        // Sync languages
+        $doctor->languages()->sync($validated['language_ids']);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Languages updated successfully',
+            'data' => [
+                'languages' => $doctor->languages()->get()
+            ]
+        ]);
     }
 
     /**
@@ -89,10 +243,16 @@ class DoctorController extends Controller
     {
         try {
             $doctor = Doctor::findOrFail($doctorId);
-            $schedule = $doctor->availabilities->groupBy('day_of_week')->map->pluck('time_range');
+            $schedule = $doctor->horaires ?? [];
             $leaves = $doctor->leaves;
 
-            return response()->json(['data' => ['schedule' => $schedule, 'leaves' => $leaves]]);
+            return response()->json([
+                'data' => [
+                    'schedule' => $schedule,
+                    'leaves' => $leaves,
+                    'languages' => $doctor->languages,
+                ]
+            ]);
         } catch (\Exception $e) {
             Log::error('Error fetching availability for doctor ID ' . $doctorId . ': ' . $e->getMessage(), [
                 'trace' => $e->getTraceAsString()
@@ -112,7 +272,14 @@ class DoctorController extends Controller
             $doctor = Doctor::findOrFail($doctorId);
             $slots = $this->getAvailableSlots($doctor, $date);
 
-            return response()->json(['data' => $slots]);
+            return response()->json([
+                'data' => $slots,
+                'meta' => [
+                    'doctor_id' => $doctorId,
+                    'date' => $date,
+                    'total_slots' => count($slots),
+                ]
+            ]);
         } catch (\Exception $e) {
             Log::error('Error fetching slots for doctor ID ' . $doctorId . ': ' . $e->getMessage(), [
                 'trace' => $e->getTraceAsString()
@@ -123,75 +290,111 @@ class DoctorController extends Controller
     }
 
     /**
+     * Get doctor statistics (summary).
+     */
+    public function statistics(int $doctorId): JsonResponse
+    {
+        $doctor = Doctor::findOrFail($doctorId);
+
+        $stats = [
+            'total_appointments' => $doctor->appointments()->count(),
+            'completed_appointments' => $doctor->appointments()->where('statut', 'terminé')->count(),
+            'upcoming_appointments' => $doctor->appointments()
+                ->where('date_heure', '>', now())
+                ->whereIn('statut', ['confirmé', 'en_attente'])
+                ->count(),
+            'total_patients' => $doctor->appointments()->distinct('patient_id')->count('patient_id'),
+            'rating' => [
+                'average' => $doctor->average_rating,
+                'total_reviews' => $doctor->total_reviews,
+            ],
+            'languages' => $doctor->languages->pluck('nom'),
+        ];
+
+        return response()->json(['data' => $stats]);
+    }
+
+    /**
      * Helper method to get available slots for a doctor.
      */
     protected function getAvailableSlots(Doctor $doctor, string $date): array
     {
         try {
-            $dayOfWeek = strtolower(now()->parse($date)->format('l'));
+            $parsedDate = Carbon::parse($date);
+            $dayOfWeek = strtolower($parsedDate->format('l'));
+
+            // Map English to French days
+            $dayMap = [
+                'monday' => 'lundi',
+                'tuesday' => 'mardi',
+                'wednesday' => 'mercredi',
+                'thursday' => 'jeudi',
+                'friday' => 'vendredi',
+                'saturday' => 'samedi',
+                'sunday' => 'dimanche',
+            ];
+
+            $frenchDay = $dayMap[$dayOfWeek] ?? $dayOfWeek;
 
             // Check if doctor is on leave
-            $leaves = $doctor->leaves->filter(fn($leave) =>
-                now()->parse($date)->between($leave->start_date, $leave->end_date));
+            $isOnLeave = $doctor->leaves()
+                ->where('start_date', '<=', $parsedDate)
+                ->where('end_date', '>=', $parsedDate)
+                ->exists();
 
-            if ($leaves->isNotEmpty()) {
-                Log::info('No slots available due to leave', [
-                    'doctor_id' => $doctor->id,
-                    'date' => $date,
-                    'leaves' => $leaves->toArray(),
-                ]);
+            if ($isOnLeave) {
                 return [];
             }
 
             // Get doctor's schedule for the day
-            $schedule = $doctor->availabilities->where('day_of_week', $dayOfWeek);
+            $horaires = $doctor->horaires ?? [];
+            $dailySchedule = $horaires[$frenchDay] ?? [];
 
-            // Get existing appointments
-            $appointments = $doctor->appointments->filter(fn($appt) =>
-                now()->parse($appt->date_heure)->isSameDay(now()->parse($date)));
+            if (empty($dailySchedule)) {
+                return [];
+            }
 
             $slots = [];
+            $slotDuration = 30; // minutes
 
-            // Generate slots from schedule
-            foreach ($schedule as $range) {
-                if (!$range->time_range) {
+            // Parse schedule string
+            if (is_string($dailySchedule)) {
+                $timeRanges = explode(',', $dailySchedule);
+            } else {
+                $timeRanges = $dailySchedule;
+            }
+
+            foreach ($timeRanges as $timeRange) {
+                $timeRange = trim($timeRange);
+                if (strpos($timeRange, '-') === false) {
                     continue;
                 }
 
-                $timeRange = explode('-', $range->time_range);
-                if (count($timeRange) !== 2) {
-                    continue;
-                }
+                [$start, $end] = explode('-', $timeRange);
+                $start = trim($start);
+                $end = trim($end);
 
-                $start = now()->parse("$date {$timeRange[0]}");
-                $end = now()->parse("$date {$timeRange[1]}");
+                $startTime = Carbon::parse($date . ' ' . $start);
+                $endTime = Carbon::parse($date . ' ' . $end);
 
-                while ($start < $end) {
-                    $slotEnd = $start->copy()->addMinutes(30);
-
-                    // Check if slot is available
-                    if (!$appointments->first(fn($appt) =>
-                        now()->parse($appt->date_heure)->eq($start))) {
-                        $slots[] = $start->format('H:i');
-                    }
-
-                    $start = $slotEnd;
+                while ($startTime < $endTime) {
+                    $slots[] = $startTime->format('H:i');
+                    $startTime->addMinutes($slotDuration);
                 }
             }
 
-            Log::info('Slots generated', [
-                'doctor_id' => $doctor->id,
-                'date' => $date,
-                'day_of_week' => $dayOfWeek,
-                'slots' => $slots,
-            ]);
+            // Remove booked slots
+            $bookedSlots = $doctor->appointments()
+                ->whereDate('date_heure', $parsedDate)
+                ->whereNotIn('statut', ['annulé', 'no_show'])
+                ->pluck('date_heure')
+                ->map(fn($dt) => Carbon::parse($dt)->format('H:i'))
+                ->toArray();
 
-            return $slots;
+            return array_values(array_diff($slots, $bookedSlots));
         } catch (\Exception $e) {
-            Log::error('Error in getAvailableSlots for doctor ID ' . $doctor->id . ': ' . $e->getMessage(), [
-                'trace' => $e->getTraceAsString()
-            ]);
-            throw $e;
+            Log::error('Error in getAvailableSlots: ' . $e->getMessage());
+            return [];
         }
     }
 
@@ -201,34 +404,32 @@ class DoctorController extends Controller
     public function updateSchedule(Request $request, int $doctorId): JsonResponse
     {
         $request->validate([
-            'monday' => 'array',
-            'tuesday' => 'array',
-            'wednesday' => 'array',
-            'thursday' => 'array',
-            'friday' => 'array',
-            'saturday' => 'array',
-            'sunday' => 'array',
+            'lundi' => 'nullable|string',
+            'mardi' => 'nullable|string',
+            'mercredi' => 'nullable|string',
+            'jeudi' => 'nullable|string',
+            'vendredi' => 'nullable|string',
+            'samedi' => 'nullable|string',
+            'dimanche' => 'nullable|string',
         ]);
 
         $doctor = Doctor::findOrFail($doctorId);
 
-        // Delete existing schedule
-        $doctor->availabilities()->delete();
+        $horaires = [];
+        $days = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
 
-        // Create new schedule
-        $days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
         foreach ($days as $day) {
-            if ($request->has($day)) {
-                foreach ($request->input($day) as $timeRange) {
-                    $doctor->availabilities()->create([
-                        'day_of_week' => $day,
-                        'time_range' => $timeRange,
-                    ]);
-                }
+            if ($request->has($day) && !empty($request->input($day))) {
+                $horaires[$day] = $request->input($day);
             }
         }
 
-        return response()->json(['message' => 'Schedule updated successfully']);
+        $doctor->update(['horaires' => $horaires]);
+
+        return response()->json([
+            'message' => 'Schedule updated successfully',
+            'data' => $horaires
+        ]);
     }
 
     /**
@@ -239,7 +440,7 @@ class DoctorController extends Controller
         $request->validate([
             'start_date' => 'required|date',
             'end_date' => 'required|date|after_or_equal:start_date',
-            'reason' => 'required|string',
+            'reason' => 'nullable|string|max:255',
         ]);
 
         $doctor = Doctor::findOrFail($doctorId);
@@ -259,7 +460,6 @@ class DoctorController extends Controller
         Log::info('Authenticated user', ['user' => $user ? json_decode(json_encode($user), true) : null]);
 
         if ($user && $user->id != $doctorId && $user->role !== 'medecin') {
-        Log::info('Authenticated user', ['user' => $user ? json_decode(json_encode($user), true) : null]);
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 

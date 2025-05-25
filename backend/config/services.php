@@ -42,6 +42,21 @@ return [
         'redirect' => env('FACEBOOK_REDIRECT_URI'),
     ],
 
+    'stripe' => [
+        'key' => env('STRIPE_KEY'),
+        'secret' => env('STRIPE_SECRET'),
+        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+        'webhook_tolerance' => env('STRIPE_WEBHOOK_TOLERANCE', 300),
+    ],
+
+    'cih_pay' => [
+        'merchant_id' => env('CIH_PAY_MERCHANT_ID'),
+        'api_key' => env('CIH_PAY_API_KEY'),
+        'api_secret' => env('CIH_PAY_API_SECRET'),
+        'endpoint' => env('CIH_PAY_ENDPOINT', 'https://api.cihpay.ma'),
+        'webhook_secret' => env('CIH_PAY_WEBHOOK_SECRET'),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),

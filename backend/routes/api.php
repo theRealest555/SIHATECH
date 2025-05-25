@@ -13,6 +13,7 @@ use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Patient\ProfileController as PatientProfileController;
 use App\Http\Controllers\Doctor\ProfileController as DoctorProfileController;
 use App\Http\Controllers\Doctor\DocumentController;
+use App\Http\Controllers\Doctor\StatisticsController as DoctorStatisticsController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\AdminController;
 use App\Http\Controllers\Admin\DoctorVerificationController;
@@ -21,12 +22,17 @@ use App\Http\Controllers\Api\AvailabilityController;
 use App\Http\Controllers\DoctorController;
 use App\Http\Controllers\SubscriptionController;
 use App\Http\Controllers\ReportController;
+use App\Http\Controllers\Webhooks\StripeWebhookController;
 
 /*
 |--------------------------------------------------------------------------
 | API Routes
 |--------------------------------------------------------------------------
 */
+
+// Webhook Routes (No CSRF protection)
+Route::post('/webhooks/stripe', [StripeWebhookController::class, 'handleWebhook'])
+    ->name('webhooks.stripe');
 
 // Guest Routes (No Authentication Required)
 Route::middleware('guest')->group(function () {
@@ -50,11 +56,16 @@ Route::middleware('guest')->group(function () {
 Route::group(['prefix' => 'public'], function () {
     // Public Doctor Information
     Route::get('/doctors', [DoctorController::class, 'index'])->name('api.public.doctors.index');
-    Route::get('/doctors/specialities', [DoctorController::class, 'specialities'])->name('api.public.doctors.specialities');
-    Route::get('/doctors/locations', [DoctorController::class, 'locations'])->name('api.public.doctors.locations');
     Route::get('/doctors/search', [DoctorController::class, 'search'])->name('api.public.doctors.search');
+    Route::get('/doctors/{doctor}', [DoctorController::class, 'show'])->name('api.public.doctors.show');
+    Route::get('/doctors/{doctor}/statistics', [DoctorController::class, 'statistics'])->name('api.public.doctors.statistics');
     Route::get('/doctors/{doctor}/availability', [AvailabilityController::class, 'getAvailability'])->name('api.public.doctors.availability');
     Route::get('/doctors/{doctor}/slots', [AppointmentController::class, 'getAvailableSlots'])->name('api.public.doctors.slots');
+
+    // Public Resources
+    Route::get('/specialities', [DoctorController::class, 'specialities'])->name('api.public.specialities');
+    Route::get('/languages', [DoctorController::class, 'languages'])->name('api.public.languages');
+    Route::get('/locations', [DoctorController::class, 'locations'])->name('api.public.locations');
 });
 
 // Email Verification Routes (Signed URLs)
@@ -93,6 +104,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
                 'id' => $user->doctor->id,
                 'is_verified' => $user->doctor->is_verified,
                 'speciality' => $user->doctor->speciality,
+                'average_rating' => $user->doctor->average_rating,
+                'total_reviews' => $user->doctor->total_reviews,
             ];
         } elseif ($user->role === 'patient' && $user->patient) {
             $userData['patient'] = [
@@ -151,6 +164,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::put('/profile', [DoctorProfileController::class, 'update'])->name('api.doctor.profile.update');
             Route::put('/profile/password', [DoctorProfileController::class, 'updatePassword'])->name('api.doctor.profile.password');
             Route::post('/profile/photo', [DoctorProfileController::class, 'updatePhoto'])->name('api.doctor.profile.photo');
+            Route::put('/languages', [DoctorController::class, 'updateLanguages'])->name('api.doctor.languages.update');
 
             // Document Management
             Route::get('/documents', [DocumentController::class, 'index'])->name('api.doctor.documents.index');
@@ -161,6 +175,15 @@ Route::middleware(['auth:sanctum'])->group(function () {
             // Appointments Management
             Route::get('/appointments', [AppointmentController::class, 'getAppointments'])->name('api.doctor.appointments.index');
             Route::patch('/appointments/{id}/status', [AppointmentController::class, 'updateStatus'])->name('api.doctor.appointments.update-status');
+            Route::post('/appointments/{id}/no-show', [AppointmentController::class, 'markAsNoShow'])->name('api.doctor.appointments.mark-no-show');
+            Route::get('/appointments/no-show-stats', [AppointmentController::class, 'getNoShowStats'])->name('api.doctor.appointments.no-show-stats');
+
+            // Statistics
+            Route::get('/stats', [DoctorStatisticsController::class, 'index'])->name('api.doctor.stats');
+            Route::get('/stats/appointments', [DoctorStatisticsController::class, 'appointments'])->name('api.doctor.stats.appointments');
+            Route::get('/stats/patients', [DoctorStatisticsController::class, 'patients'])->name('api.doctor.stats.patients');
+            Route::get('/stats/revenue', [DoctorStatisticsController::class, 'revenue'])->name('api.doctor.stats.revenue');
+            Route::get('/stats/export', [DoctorStatisticsController::class, 'export'])->name('api.doctor.stats.export');
 
             // Availability Management (for all doctors)
             Route::get('/availability', function(Request $request) {
@@ -218,6 +241,9 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::post('/doctors/{id}/verify', [DoctorVerificationController::class, 'verifyDoctor'])->name('api.admin.doctors.verify');
             Route::post('/doctors/{id}/revoke', [DoctorVerificationController::class, 'revokeVerification'])->name('api.admin.doctors.revoke');
 
+            // Appointment Management
+            Route::post('/appointments/{id}/no-show', [AppointmentController::class, 'markAsNoShow'])->name('api.admin.appointments.mark-no-show');
+
             // Reports and Analytics
             Route::get('/reports/financial', [ReportController::class, 'financialStats'])->name('api.admin.reports.financial');
             Route::get('/reports/appointments', [ReportController::class, 'rendezvousStats'])->name('api.admin.reports.appointments');
@@ -227,9 +253,13 @@ Route::middleware(['auth:sanctum'])->group(function () {
         // Subscription Routes (for all authenticated users)
         Route::group(['prefix' => 'subscriptions'], function () {
             Route::get('/plans', [SubscriptionController::class, 'getPlans'])->name('api.subscriptions.plans');
+            Route::get('/setup-intent', [SubscriptionController::class, 'getSetupIntent'])->name('api.subscriptions.setup-intent');
             Route::post('/subscribe', [SubscriptionController::class, 'subscribe'])->name('api.subscriptions.subscribe');
             Route::post('/cancel', [SubscriptionController::class, 'cancelSubscription'])->name('api.subscriptions.cancel');
+            Route::put('/payment-method', [SubscriptionController::class, 'updatePaymentMethod'])->name('api.subscriptions.update-payment-method');
             Route::get('/current', [SubscriptionController::class, 'getUserSubscription'])->name('api.subscriptions.current');
+            Route::get('/history', [SubscriptionController::class, 'getSubscriptionHistory'])->name('api.subscriptions.history');
+            Route::get('/payments', [SubscriptionController::class, 'getPaymentHistory'])->name('api.subscriptions.payments');
         });
 
         // General Appointments Route (accessible by doctors and patients)
@@ -244,10 +274,11 @@ Route::fallback(function () {
         'message' => 'API endpoint not found',
         'available_endpoints' => [
             'auth' => '/api/login, /api/register, /api/logout',
-            'public' => '/api/public/doctors, /api/public/doctors/search',
+            'public' => '/api/public/doctors, /api/public/doctors/search, /api/public/languages',
             'patient' => '/api/patient/profile, /api/patient/appointments',
-            'doctor' => '/api/doctor/profile, /api/doctor/appointments, /api/doctor/documents',
-            'admin' => '/api/admin/dashboard, /api/admin/users, /api/admin/doctors/pending'
+            'doctor' => '/api/doctor/profile, /api/doctor/appointments, /api/doctor/documents, /api/doctor/stats',
+            'admin' => '/api/admin/dashboard, /api/admin/users, /api/admin/doctors/pending',
+            'subscriptions' => '/api/subscriptions/plans, /api/subscriptions/current'
         ]
     ], 404);
 });

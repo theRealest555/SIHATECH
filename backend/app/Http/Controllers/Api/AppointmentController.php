@@ -8,9 +8,10 @@ use App\Models\Rendezvous;
 use App\Models\Leave;
 use App\Http\Requests\BookAppointmentRequest;
 use App\Http\Requests\UpdateAppointmentStatusRequest;
+use App\Http\Requests\MarkAppointmentAsNoShowRequest;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Carbon; 
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
@@ -63,7 +64,8 @@ class AppointmentController extends Controller
                     'day_of_week' => $day,
                     'total_slots' => 0,
                     'booked_slots' => 0,
-                    'available_slots' => 0
+                    'available_slots' => 0,
+                    'is_on_leave' => true
                 ]
             ]);
         }
@@ -112,10 +114,10 @@ class AppointmentController extends Controller
             }
         }
 
-        // Get existing appointments (fixed: patient_id references users table)
+        // Get existing appointments (excluding cancelled and no-show)
         $existingAppointments = Rendezvous::where('doctor_id', $doctor->id)
             ->whereDate('date_heure', $date)
-            ->whereNotIn('statut', ['annulé', 'terminé'])
+            ->whereNotIn('statut', ['annulé', 'terminé', 'no_show'])
             ->pluck('date_heure')
             ->map(fn($dt) => $dt->format('H:i'))
             ->toArray();
@@ -133,7 +135,8 @@ class AppointmentController extends Controller
                 'day_of_week' => $day,
                 'total_slots' => count($slots),
                 'booked_slots' => count($existingAppointments),
-                'available_slots' => count($availableSlots)
+                'available_slots' => count($availableSlots),
+                'is_on_leave' => false
             ]
         ]);
     }
@@ -164,7 +167,7 @@ class AppointmentController extends Controller
                 // Check if the slot is still available
                 $existingAppointment = Rendezvous::where('doctor_id', $doctorId)
                     ->where('date_heure', $dateHeure)
-                    ->whereNotIn('statut', ['annulé', 'terminé'])
+                    ->whereNotIn('statut', ['annulé', 'terminé', 'no_show'])
                     ->first();
 
                 if ($existingAppointment) {
@@ -174,9 +177,9 @@ class AppointmentController extends Controller
                     ], 409);
                 }
 
-                // Create appointment (patient_id references users table directly)
+                // Create appointment
                 $rendezvous = Rendezvous::create([
-                    'patient_id' => $user->id, // Use authenticated user's ID directly
+                    'patient_id' => $user->id,
                     'doctor_id' => $doctorId,
                     'date_heure' => $dateHeure,
                     'statut' => 'en_attente',
@@ -223,13 +226,138 @@ class AppointmentController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
+        $validated = $request->validated();
+
+        // Prevent patients from marking appointments as no-show
+        if ($user->role === 'patient' && $validated['statut'] === 'no_show') {
+            return response()->json([
+                'message' => 'Patients cannot mark appointments as no-show'
+            ], 403);
+        }
+
         $rendezvous->update([
-            'statut' => $request->validated()['statut'],
+            'statut' => $validated['statut'],
         ]);
 
         return response()->json([
             'status' => 'success',
             'data' => $rendezvous->load(['doctor.user', 'doctor.speciality', 'patient']),
+        ]);
+    }
+
+    /**
+     * Mark an appointment as no-show
+     */
+    public function markAsNoShow(MarkAppointmentAsNoShowRequest $request, int $id): JsonResponse
+    {
+        $appointment = Rendezvous::findOrFail($id);
+        $user = auth::user();
+
+        // Additional authorization check
+        if ($user->role === 'medecin' && $appointment->doctor_id !== $user->doctor->id) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        // Check if appointment is in the past
+        if ($appointment->date_heure > now()) {
+            return response()->json([
+                'message' => 'Cannot mark future appointments as no-show'
+            ], 400);
+        }
+
+        // Check if appointment is already marked as no-show
+        if ($appointment->statut === 'no_show') {
+            return response()->json([
+                'message' => 'Appointment is already marked as no-show'
+            ], 400);
+        }
+
+        $validated = $request->validated();
+
+        $appointment->update([
+            'statut' => 'no_show',
+        ]);
+
+        // Log the no-show reason if provided
+        if (!empty($validated['reason'])) {
+            Log::info('Appointment marked as no-show', [
+                'appointment_id' => $appointment->id,
+                'marked_by' => $user->id,
+                'reason' => $validated['reason'],
+            ]);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Appointment marked as no-show',
+            'data' => $appointment->load(['doctor.user', 'doctor.speciality', 'patient']),
+        ]);
+    }
+
+    /**
+     * Get no-show statistics for a doctor
+     */
+    public function getNoShowStats(Request $request): JsonResponse
+    {
+        $user = auth::user();
+
+        if ($user->role !== 'medecin') {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
+
+        $doctor = $user->doctor;
+
+        if (!$doctor) {
+            return response()->json(['message' => 'Doctor profile not found'], 404);
+        }
+
+        $startDate = $request->get('start_date', now()->subMonth());
+        $endDate = $request->get('end_date', now());
+
+        $stats = Rendezvous::where('doctor_id', $doctor->id)
+            ->whereBetween('date_heure', [$startDate, $endDate])
+            ->selectRaw('
+                COUNT(*) as total,
+                SUM(CASE WHEN statut = "no_show" THEN 1 ELSE 0 END) as no_shows,
+                SUM(CASE WHEN statut = "terminé" THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN statut = "annulé" THEN 1 ELSE 0 END) as cancelled
+            ')
+            ->first();
+
+        $noShowRate = $stats->total > 0 ? round(($stats->no_shows / $stats->total) * 100, 2) : 0;
+
+        // Get repeat no-show patients
+        $repeatNoShows = Rendezvous::where('doctor_id', $doctor->id)
+            ->where('statut', 'no_show')
+            ->whereBetween('date_heure', [$startDate, $endDate])
+            ->groupBy('patient_id')
+            ->selectRaw('patient_id, COUNT(*) as no_show_count')
+            ->having('no_show_count', '>', 1)
+            ->with('patient')
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'summary' => [
+                    'total_appointments' => $stats->total,
+                    'no_shows' => $stats->no_shows,
+                    'completed' => $stats->completed,
+                    'cancelled' => $stats->cancelled,
+                    'no_show_rate' => $noShowRate,
+                ],
+                'repeat_no_shows' => $repeatNoShows->map(function($item) {
+                    return [
+                        'patient_id' => $item->patient_id,
+                        'patient_name' => $item->patient ? $item->patient->prenom . ' ' . $item->patient->nom : 'N/A',
+                        'no_show_count' => $item->no_show_count,
+                    ];
+                }),
+                'period' => [
+                    'start_date' => $startDate,
+                    'end_date' => $endDate,
+                ]
+            ]
         ]);
     }
 
@@ -250,7 +378,16 @@ class AppointmentController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        $appointment->statut = $request->validated()['statut'];
+        $validated = $request->validated();
+
+        // Prevent patients from marking appointments as no-show
+        if ($user->role === 'patient' && $validated['statut'] === 'no_show') {
+            return response()->json([
+                'message' => 'Patients cannot mark appointments as no-show'
+            ], 403);
+        }
+
+        $appointment->statut = $validated['statut'];
         $appointment->save();
 
         return response()->json([
@@ -268,6 +405,7 @@ class AppointmentController extends Controller
         $doctorId = $request->query('doctor_id');
         $patientId = $request->query('patient_id');
         $date = $request->has('date') ? Carbon::parse($request->query('date')) : null;
+        $status = $request->query('status');
 
         $query = Rendezvous::query()
             ->with(['doctor.user', 'doctor.speciality', 'patient'])
@@ -292,6 +430,10 @@ class AppointmentController extends Controller
             $query->whereDate('date_heure', $date);
         }
 
+        if ($status) {
+            $query->where('statut', $status);
+        }
+
         $appointments = $query->get()->map(function ($appointment) {
             return [
                 'id' => $appointment->id,
@@ -308,12 +450,23 @@ class AppointmentController extends Controller
                 'speciality' => $appointment->doctor && $appointment->doctor->speciality
                     ? $appointment->doctor->speciality->nom
                     : 'N/A',
+                'can_be_cancelled' => $appointment->canBeCancelled(),
+                'is_past' => $appointment->date_heure < now(),
             ];
         });
 
         return response()->json([
             'status' => 'success',
             'data' => $appointments,
+            'meta' => [
+                'total' => $appointments->count(),
+                'filters' => array_filter([
+                    'doctor_id' => $doctorId,
+                    'patient_id' => $patientId,
+                    'date' => $date ? $date->format('Y-m-d') : null,
+                    'status' => $status,
+                ])
+            ]
         ]);
     }
 }
