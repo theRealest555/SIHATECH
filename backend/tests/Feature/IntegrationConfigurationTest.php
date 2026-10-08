@@ -6,6 +6,15 @@ use Tests\TestCase;
 
 class IntegrationConfigurationTest extends TestCase
 {
+    public function test_invalid_or_local_smtp_urls_do_not_fall_back_to_valid_host_settings(): void
+    {
+        config(['mail.default' => 'smtp', 'mail.mailers.smtp.host' => 'smtp.sihatech.test', 'mail.mailers.smtp.username' => 'staging-user', 'mail.mailers.smtp.password' => 'staging-password']);
+        foreach (['not-a-mail-url', 'smtp://staging-user:staging-password@127.0.0.1:8265'] as $url) {
+            config(['mail.mailers.smtp.url' => $url]);
+            $this->artisan('integrations:check --json')->expectsOutputToContain('"mail":"missing_or_invalid"')->assertFailed();
+        }
+    }
+
     public function test_dummy_credentials_and_local_mail_cannot_pass_a_release_check(): void
     {
         config(['services.stripe.key' => 'pk_test_dummy', 'services.stripe.secret' => 'sk_test_dummy', 'services.stripe.webhook_secret' => 'whsec_test_dummy', 'services.google.enabled' => false, 'services.facebook.enabled' => false, 'mail.default' => 'array']);

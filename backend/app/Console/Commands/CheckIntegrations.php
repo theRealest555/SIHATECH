@@ -38,12 +38,17 @@ class CheckIntegrations extends Command
         }
         $mailer = config('mail.default');
         $transport = config('mail.mailers.'.$mailer.'.transport');
+        $smtpUrl = config('mail.mailers.'.$mailer.'.url');
+        $smtpParts = is_string($smtpUrl) ? parse_url($smtpUrl) : false;
+        $remoteHost = fn ($host) => $usable($host) && ! in_array(strtolower($host), ['localhost', '127.0.0.1', '::1', '[::1]'], true);
+        $smtpUrlConfigured = $usable($smtpUrl) && is_array($smtpParts)
+            && in_array($smtpParts['scheme'] ?? '', ['smtp', 'smtps'], true)
+            && $remoteHost($smtpParts['host'] ?? null)
+            && $usable($smtpParts['user'] ?? null) && $usable($smtpParts['pass'] ?? null);
         $checks['mail'] = match ($transport) {
-            'smtp' => $usable(config('mail.mailers.'.$mailer.'.url'))
-                || ($usable(config('mail.mailers.'.$mailer.'.host'))
-                    && ! in_array(strtolower(config('mail.mailers.'.$mailer.'.host')), ['localhost', '127.0.0.1', '::1'], true)
+            'smtp' => ($smtpUrl ? $smtpUrlConfigured : ($remoteHost(config('mail.mailers.'.$mailer.'.host'))
                     && $usable(config('mail.mailers.'.$mailer.'.username'))
-                    && $usable(config('mail.mailers.'.$mailer.'.password'))) ? 'configured' : 'missing_or_invalid',
+                    && $usable(config('mail.mailers.'.$mailer.'.password')))) ? 'configured' : 'missing_or_invalid',
             'postmark' => $usable(config('services.postmark.token')) ? 'configured' : 'missing_or_invalid',
             'ses' => $usable(config('services.ses.key')) && $usable(config('services.ses.secret')) ? 'configured' : 'missing_or_invalid',
             default => 'requires_manual_check',
