@@ -1,11 +1,33 @@
 <?php
 
+use App\Http\Controllers\HealthController;
+use App\Http\Middleware\ActiveUser;
+use App\Http\Middleware\EnsureCurrentSession;
+use App\Http\Middleware\EnsureEmailIsVerified;
+use App\Http\Middleware\RedirectIfAuthenticated;
+// Ensure this Facade is imported
+use App\Http\Middleware\RoleMiddleware;
+use App\Http\Middleware\VerifiedDoctor;
+use Illuminate\Auth\AuthenticationException;
+use Illuminate\Auth\Middleware\Authenticate;
+use Illuminate\Auth\Middleware\AuthenticateWithBasicAuth;
+use Illuminate\Auth\Middleware\Authorize;
+use Illuminate\Auth\Middleware\RequirePassword;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Foundation\Http\Middleware\HandlePrecognitiveRequests;
+use Illuminate\Http\Middleware\SetCacheHeaders;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\RateLimiter; // Ensure this Facade is imported
-use Illuminate\Cache\RateLimiting\Limit;    // Ensure Limit class is imported
+use Illuminate\Routing\Middleware\ThrottleRequests;
+use Illuminate\Routing\Middleware\ValidateSignature;
+use Illuminate\Session\Middleware\AuthenticateSession;
+use Illuminate\Support\Facades\Route;
+use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
+
+// Ensure Limit class is imported
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -13,78 +35,51 @@ return Application::configure(basePath: dirname(__DIR__))
         api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
+        then: function () {
+            Route::get('/health', HealthController::class);
+        },
     )
     ->withMiddleware(function (Middleware $middleware) {
-        // Global HTTP middleware stack.
-        // HandleCors should be early, especially for preflight requests.
-        $middleware->use([
-            \Illuminate\Http\Middleware\TrustProxies::class,
-            \Illuminate\Http\Middleware\HandleCors::class, // Handles CORS headers
-            // Add other global middleware if necessary, e.g.:
-            // \Illuminate\Foundation\Http\Middleware\ValidatePostSize::class,
-            // \Illuminate\Foundation\Http\Middleware\PreventRequestsDuringMaintenance::class,
-            // \Illuminate\Http\Middleware\TrimStrings::class,
-            // \Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::class,
-        ]);
+        $middleware->statefulApi();
 
-        // API specific middleware stack
-        // EnsureFrontendRequestsAreStateful is crucial for Sanctum SPA auth.
-        $middleware->api(prepend: [
-            \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
-        ]);
-        
         // Middleware aliases
         $middleware->alias([
-            'auth' => \Illuminate\Auth\Middleware\Authenticate::class,
-            'auth.basic' => \Illuminate\Auth\Middleware\AuthenticateWithBasicAuth::class,
-            'auth.session' => \Illuminate\Session\Middleware\AuthenticateSession::class,
-            'cache.headers' => \Illuminate\Http\Middleware\SetCacheHeaders::class,
-            'can' => \Illuminate\Auth\Middleware\Authorize::class,
-            'guest' => \App\Http\Middleware\RedirectIfAuthenticated::class,
-            'password.confirm' => \Illuminate\Auth\Middleware\RequirePassword::class,
-            'precognitive' => \Illuminate\Foundation\Http\Middleware\HandlePrecognitiveRequests::class,
-            'signed' => \Illuminate\Routing\Middleware\ValidateSignature::class,
-            'throttle' => \Illuminate\Routing\Middleware\ThrottleRequests::class,
-            'verified' => \App\Http\Middleware\EnsureEmailIsVerified::class,
-            
+            'auth' => Authenticate::class,
+            'auth.basic' => AuthenticateWithBasicAuth::class,
+            'auth.session' => AuthenticateSession::class,
+            'cache.headers' => SetCacheHeaders::class,
+            'can' => Authorize::class,
+            'guest' => RedirectIfAuthenticated::class,
+            'password.confirm' => RequirePassword::class,
+            'precognitive' => HandlePrecognitiveRequests::class,
+            'signed' => ValidateSignature::class,
+            'throttle' => ThrottleRequests::class,
+            'verified' => EnsureEmailIsVerified::class,
+
             // Custom middleware
-            'role' => \App\Http\Middleware\RoleMiddleware::class,
-            'verified.doctor' => \App\Http\Middleware\VerifiedDoctor::class,
-            'active.user' => \App\Http\Middleware\ActiveUser::class,
+            'role' => RoleMiddleware::class,
+            'verified.doctor' => VerifiedDoctor::class,
+            'active.user' => ActiveUser::class,
+            'current.session' => EnsureCurrentSession::class,
         ]);
 
-        // Configure API rate limiting.
-        // This is the correct place for RateLimiter::for in Laravel 11.
-        // The "Facade root not set" error indicates an issue earlier in bootstrapping
-        // or with the RateLimiter service provider/cache setup.
-        try {
-            RateLimiter::for('api', function (Request $request) {
-                return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
-            });
-        } catch (\RuntimeException $e) {
-            // Log the fact that RateLimiter could not be configured here.
-            // This helps confirm if this specific block is the source of a bootstrap-time error.
-            error_log('Failed to configure RateLimiter in bootstrap/app.php: ' . $e->getMessage());
-            // Depending on your error handling preference, you might re-throw or handle differently.
-            // For now, we'll let it potentially fail if there's a deeper issue.
-        }
-        
         $middleware->throttleApi(); // Applies the 'throttle:api' middleware group.
 
     })
     ->withExceptions(function (Exceptions $exceptions) {
         // Handle authentication exceptions for API
-        $exceptions->render(function (\Illuminate\Auth\AuthenticationException $e, Request $request) {
+        $exceptions->render(function (AuthenticationException $e, Request $request) {
             if ($request->expectsJson() || $request->is('api/*')) {
                 return response()->json([
                     'message' => 'Unauthenticated. Please login.',
                 ], 401);
             }
+
             return response()->json(['message' => 'Unauthenticated (Non-API context)'], 401);
         });
 
         // Handle validation exceptions
-        $exceptions->render(function (\Illuminate\Validation\ValidationException $e, Request $request) {
+        $exceptions->render(function (ValidationException $e, Request $request) {
             if ($request->expectsJson() || $request->is('api/*')) {
                 return response()->json([
                     'message' => $e->getMessage(),
@@ -95,12 +90,12 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         // Handle general exceptions for API
-        $exceptions->render(function (\Throwable $e, Request $request) {
+        $exceptions->render(function (Throwable $e, Request $request) {
             if ($request->expectsJson() || $request->is('api/*')) {
-                $status = $e instanceof \Symfony\Component\HttpKernel\Exception\HttpExceptionInterface ? $e->getStatusCode() : 500;
-                
+                $status = $e instanceof HttpExceptionInterface ? $e->getStatusCode() : 500;
+
                 $responsePayload = [
-                    'message' => ($status === 500 && !config('app.debug')) ? 'Server Error' : $e->getMessage(),
+                    'message' => ($status === 500 && ! config('app.debug')) ? 'Server Error' : $e->getMessage(),
                 ];
 
                 if (config('app.debug')) {
@@ -112,8 +107,9 @@ return Application::configure(basePath: dirname(__DIR__))
                         'trace' => array_slice(explode("\n", $e->getTraceAsString()), 0, 15),
                     ];
                 }
-                return response()->json($responsePayload, $status);
+
+                return response()->json($responsePayload, $status, $e instanceof HttpExceptionInterface ? $e->getHeaders() : []);
             }
-            throw $e; 
+            throw $e;
         });
     })->create();

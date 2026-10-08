@@ -1,5 +1,5 @@
+import PropTypes from 'prop-types';
 // src/pages/HomePage.jsx
-import React from 'react';
 import { Link } from 'react-router-dom';
 import { FaUserMd, FaCalendarCheck, FaSearch, FaShieldAlt, FaBlog, FaQuestionCircle, FaFacebookF, FaTwitter, FaLinkedinIn } from 'react-icons/fa'; // Example icons
 
@@ -18,6 +18,8 @@ const FeatureCard = ({ icon, title, description, linkTo, linkText }) => (
         </Link>
     </div>
 );
+
+FeatureCard.propTypes = { icon: PropTypes.node.isRequired, title: PropTypes.string.isRequired, description: PropTypes.string.isRequired, linkTo: PropTypes.string.isRequired, linkText: PropTypes.string.isRequired };
 
 const HomePage = () => {
     return (

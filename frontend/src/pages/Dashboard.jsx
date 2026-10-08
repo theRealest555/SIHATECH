@@ -1,5 +1,5 @@
 // src/pages/Dashboard.jsx
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
@@ -13,7 +13,7 @@ const DashboardPage = () => {
                 case 'admin':
                     navigate('/admin/dashboard', { replace: true });
                     break;
-                case 'doctor':
+                case 'medecin':
                      // Check if doctor profile is complete
                     if (user.doctor_profile_completed === false || user.doctor_profile_completed === 0 || !user.doctor_profile_completed) {
                          navigate('/doctor/complete-profile', { replace: true });

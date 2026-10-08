@@ -2,9 +2,9 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Factories\HasFactory; // Add this line
+use Illuminate\Database\Eloquent\Relations\BelongsTo; // Add this line
 
 class Rendezvous extends Model
 {
@@ -16,12 +16,12 @@ class Rendezvous extends Model
         'patient_id',
         'doctor_id',
         'date_heure',
-        'statut'
+        'statut',
     ];
 
     protected $casts = [
         'date_heure' => 'datetime',
-        'statut' => 'string'
+        'statut' => 'string',
     ];
 
     /**
@@ -33,12 +33,12 @@ class Rendezvous extends Model
     }
 
     /**
-     * Get the patient (user) that owns the appointment
-     * Since patient_id references users table directly after migration
+     * Get the patient profile that owns the appointment.
+     * The patient_id foreign key references patients.id.
      */
     public function patient(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'patient_id');
+        return $this->belongsTo(Patient::class, 'patient_id');
     }
 
     /**
@@ -47,7 +47,7 @@ class Rendezvous extends Model
      */
     public function patientProfile(): BelongsTo
     {
-        return $this->belongsTo(Patient::class, 'patient_id', 'user_id');
+        return $this->belongsTo(Patient::class, 'patient_id');
     }
 
     /**

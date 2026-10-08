@@ -5,7 +5,6 @@ namespace App\Http\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Illuminate\Support\Facades\Log;
 
 class ActiveUser
 {
@@ -13,13 +12,7 @@ class ActiveUser
     {
         $user = auth()->guard('sanctum')->user();
 
-        Log::info('ActiveUser Middleware Check', [
-            'user' => $user ? (array)$user : null,
-            'status' => $user ? $user->status : 'no user',
-            'token' => $request->bearerToken(),
-        ]);
-
-        if (!$user) {
+        if (! $user) {
             return response()->json([
                 'message' => 'you should login',
             ], 401);
@@ -27,7 +20,7 @@ class ActiveUser
 
         if ($user->status !== 'actif') {
             return response()->json([
-                'message' => 'Your account is currently ' . $user->status . '. Please contact the administrator.'
+                'message' => 'Your account is currently '.$user->status.'. Please contact the administrator.',
             ], 403);
         }
 

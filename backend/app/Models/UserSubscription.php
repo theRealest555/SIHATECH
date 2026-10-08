@@ -2,14 +2,15 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class UserSubscription extends Model
 {
     use HasFactory;
+
     protected $fillable = [
         'user_id',
         'subscription_plan_id',
@@ -17,14 +18,16 @@ class UserSubscription extends Model
         'starts_at',
         'ends_at',
         'cancelled_at',
-        'payment_method'
+        'payment_method',
     ];
+
+    protected $hidden = ['payment_method'];
 
     protected $casts = [
         'starts_at' => 'datetime',
         'ends_at' => 'datetime',
         'cancelled_at' => 'datetime',
-        'payment_method' => 'array'
+        'payment_method' => 'array',
     ];
 
     /**
@@ -56,7 +59,9 @@ class UserSubscription extends Model
      */
     public function isActive(): bool
     {
-        return $this->status === 'active' && now()->between($this->starts_at, $this->ends_at);
+        $at = now();
+
+        return $this->status === 'active' && $this->starts_at->lte($at) && $this->ends_at->gt($at);
     }
 
     /**
@@ -64,7 +69,7 @@ class UserSubscription extends Model
      */
     public function isExpired(): bool
     {
-        return $this->ends_at < now();
+        return $this->ends_at->lte(now());
     }
 
     /**
@@ -76,7 +81,7 @@ class UserSubscription extends Model
             return 0;
         }
 
-        return now()->diffInDays($this->ends_at);
+        return (int) ceil(now()->diffInDays($this->ends_at));
     }
 
     /**
@@ -85,8 +90,8 @@ class UserSubscription extends Model
     public function scopeActive($query)
     {
         return $query->where('status', 'active')
-                    ->where('starts_at', '<=', now())
-                    ->where('ends_at', '>', now());
+            ->where('starts_at', '<=', now())
+            ->where('ends_at', '>', now());
     }
 
     /**
@@ -94,6 +99,6 @@ class UserSubscription extends Model
      */
     public function scopeExpired($query)
     {
-        return $query->where('ends_at', '<', now());
+        return $query->where('ends_at', '<=', now());
     }
 }

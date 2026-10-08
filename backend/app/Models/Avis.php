@@ -2,9 +2,9 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Factories\HasFactory; // Add this line
+use Illuminate\Database\Eloquent\Relations\BelongsTo; // Add this line
 
 class Avis extends Model
 {
@@ -15,17 +15,18 @@ class Avis extends Model
     protected $fillable = [
         'patient_id',
         'doctor_id',
-        'appointment_id', // Corrected from rendezvous_id to match migration
+        'rendezvous_id',
+        'moderation_reason',
         'rating',
         'comment',
         'status',
         'moderated_at',
-        'moderated_by'
+        'moderated_by',
     ];
 
     protected $casts = [
         'moderated_at' => 'datetime',
-        'rating' => 'integer'
+        'rating' => 'integer',
     ];
 
     /**

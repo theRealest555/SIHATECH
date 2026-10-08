@@ -1,17 +1,13 @@
+import PropTypes from 'prop-types';
 // src/components/auth/AuthLayout.jsx
-import React from 'react';
 import { Link } from 'react-router-dom';
 
 const AuthLayout = ({ children, title, subtitle }) => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-100 to-blue-100 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <Link to="/">
-            <img
-                className="mx-auto h-16 w-auto"
-                src="https://tailwindui.com/img/logos/workflow-mark-indigo-600.svg" // Replace with your logo
-                alt="SihaTech Logo"
-            />
+        <Link to="/" aria-label="SihaTech home" className="block text-center text-3xl font-black tracking-wide text-indigo-700 no-underline">
+            SIHATECH
         </Link>
         <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
           {title}
@@ -34,5 +30,7 @@ const AuthLayout = ({ children, title, subtitle }) => {
     </div>
   );
 };
+
+AuthLayout.propTypes = { children: PropTypes.node.isRequired, title: PropTypes.string.isRequired, subtitle: PropTypes.node };
 
 export default AuthLayout;

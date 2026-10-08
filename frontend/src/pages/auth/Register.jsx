@@ -1,21 +1,29 @@
 // src/pages/auth/Register.jsx
-import React, { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { FaUser, FaEnvelope, FaLock, FaUserMd, FaUserInjured, FaIdCard } from 'react-icons/fa';
+import { FaUser, FaEnvelope, FaLock, FaIdCard } from 'react-icons/fa';
+import api from '../../api/axios';
 import AuthLayout from '../../components/auth/AuthLayout';
 
 const RegisterPage = () => {
     const [formData, setFormData] = useState({
-        first_name: '',
-        last_name: '',
+        prenom: '',
+        nom: '',
         email: '',
         password: '',
         password_confirmation: '',
-        role: 'patient', // Default role
+        role: 'patient',
+        speciality_id: '',
     });
     const { register, authError, loading } = useAuth();
     const navigate = useNavigate();
+    const [specialities, setSpecialities] = useState([]);
+    const [specialityError, setSpecialityError] = useState('');
+    useEffect(() => {
+        api.get('/api/public/specialities').then(response => setSpecialities(response.data.data))
+            .catch(() => setSpecialityError('Unable to load specialities. Please reload before registering as a doctor.'));
+    }, []);
 
     const handleChange = (e) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -27,12 +35,13 @@ const RegisterPage = () => {
             alert("Passwords do not match!"); // Replace with a proper UI message
             return;
         }
-        const success = await register(formData);
+        const account = { ...formData };
+        delete account.speciality_id;
+        const success = await register(formData.role === 'medecin' ? formData : account);
         if (success) {
             // Navigate to email verification prompt or login
             // This depends on your backend's registration flow (auto-login, email verification needed)
-            alert('Registration successful! Please check your email to verify your account or login.'); // Replace with better UI
-            navigate('/login');
+            navigate('/verify-email');
         }
     };
 
@@ -43,17 +52,17 @@ const RegisterPage = () => {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                        <label htmlFor="first_name" className="block text-sm font-medium text-gray-700">First Name</label>
+                        <label htmlFor="prenom" className="block text-sm font-medium text-gray-700">First Name</label>
                         <div className="mt-1 relative">
                             <FaUser className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                            <input type="text" name="first_name" id="first_name" required value={formData.first_name} onChange={handleChange} className="appearance-none block w-full px-3 py-2 pl-10 border border-gray-300 rounded-md placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm shadow-sm" placeholder="John"/>
+                            <input type="text" name="prenom" id="prenom" required value={formData.prenom} onChange={handleChange} className="appearance-none block w-full px-3 py-2 pl-10 border border-gray-300 rounded-md placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm shadow-sm" placeholder="John"/>
                         </div>
                     </div>
                     <div>
-                        <label htmlFor="last_name" className="block text-sm font-medium text-gray-700">Last Name</label>
+                        <label htmlFor="nom" className="block text-sm font-medium text-gray-700">Last Name</label>
                         <div className="mt-1 relative">
                             <FaUser className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                            <input type="text" name="last_name" id="last_name" required value={formData.last_name} onChange={handleChange} className="appearance-none block w-full px-3 py-2 pl-10 border border-gray-300 rounded-md placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm shadow-sm" placeholder="Doe"/>
+                            <input type="text" name="nom" id="nom" required value={formData.nom} onChange={handleChange} className="appearance-none block w-full px-3 py-2 pl-10 border border-gray-300 rounded-md placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm shadow-sm" placeholder="Doe"/>
                         </div>
                     </div>
                 </div>
@@ -88,7 +97,7 @@ const RegisterPage = () => {
                         <FaIdCard className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
                         <select name="role" id="role" value={formData.role} onChange={handleChange} className="appearance-none block w-full px-3 py-2 pl-10 pr-8 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
                             <option value="patient">Patient</option>
-                            <option value="doctor">Doctor</option>
+                            <option value="medecin">Doctor</option>
                         </select>
                         <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
                             <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
@@ -96,6 +105,14 @@ const RegisterPage = () => {
                     </div>
                 </div>
 
+                {formData.role === 'medecin' && <div>
+                    <label htmlFor="speciality_id" className="block text-sm font-medium">Speciality</label>
+                    {specialityError && <p role="alert">{specialityError}</p>}
+                    <select id="speciality_id" name="speciality_id" required value={formData.speciality_id} onChange={handleChange} className="mt-1 w-full p-2 border rounded">
+                        <option value="">Choose a speciality</option>
+                        {specialities.map(item => <option key={item.id} value={item.id}>{item.nom}</option>)}
+                    </select>
+                </div>}
                 <div>
                     <button
                         type="submit"

@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import axios from '../../api/axios';
+import { clearCredentials, setCredentials } from './authSlice';
 import { API_URLS } from '../../constants/apiUrls';
 
 /**
@@ -49,7 +50,7 @@ export const fetchUserProfile = createAsyncThunk(
  */
 export const updateUserProfile = createAsyncThunk(
   'user/updateProfile',
-  async (profileData, { getState, rejectWithValue }) => {
+  async (profileData, { getState, dispatch, rejectWithValue }) => {
     try {
       const { auth } = getState();
       if (!auth.user) return null;
@@ -68,10 +69,11 @@ export const updateUserProfile = createAsyncThunk(
       if (!endpoint) return null;
       
       const response = await axios.put(endpoint, profileData);
+      dispatch(setCredentials({ user: { ...auth.user, ...response.data.user } }));
       return response.data;
     } catch (error) {
       return rejectWithValue({
-        message: error.response?.data?.message || 'Failed to update profile',
+        message: Object.values(error.response?.data?.errors || {}).flat()[0] || error.response?.data?.message || 'Failed to update profile',
         errors: error.response?.data?.errors || {}
       });
     }
@@ -87,7 +89,7 @@ export const updateUserProfile = createAsyncThunk(
  */
 export const updateUserPassword = createAsyncThunk(
   'user/updatePassword',
-  async (passwordData, { getState, rejectWithValue }) => {
+  async (passwordData, { getState, dispatch, rejectWithValue }) => {
     try {
       const { auth } = getState();
       if (!auth.user) return null;
@@ -106,6 +108,7 @@ export const updateUserPassword = createAsyncThunk(
       if (!endpoint) return null;
       
       const response = await axios.put(endpoint, passwordData);
+      if (response.data.reauthentication_required) dispatch(clearCredentials());
       return response.data;
     } catch (error) {
       return rejectWithValue({
@@ -125,7 +128,7 @@ export const updateUserPassword = createAsyncThunk(
  */
 export const uploadUserPhoto = createAsyncThunk(
   'user/uploadPhoto',
-  async (photoFile, { getState, rejectWithValue }) => {
+  async (photoFile, { getState, dispatch, rejectWithValue }) => {
     try {
       const { auth } = getState();
       if (!auth.user) return null;
@@ -146,15 +149,12 @@ export const uploadUserPhoto = createAsyncThunk(
       const formData = new FormData();
       formData.append('photo', photoFile);
       
-      const response = await axios.post(endpoint, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
+      const response = await axios.post(endpoint, formData);
+      if (response.data.user) dispatch(setCredentials({ user: { ...auth.user, ...response.data.user } }));
       return response.data;
     } catch (error) {
       return rejectWithValue({
-        message: error.response?.data?.message || 'Failed to upload photo',
+        message: Object.values(error.response?.data?.errors || {}).flat()[0] || error.response?.data?.message || 'Failed to upload photo',
         errors: error.response?.data?.errors || {}
       });
     }
@@ -226,7 +226,7 @@ const userSlice = createSlice({
         state.status = 'succeeded';
         if (state.profile && action.payload) {
           if (state.profile.user) {
-            state.profile.user.photo = action.payload.photo_url || action.payload.path;
+            state.profile.user.photo = action.payload.user?.photo || action.payload.path;
           }
         }
       })

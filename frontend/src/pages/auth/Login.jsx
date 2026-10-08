@@ -1,6 +1,8 @@
 // src/pages/auth/Login.jsx
-import React, { useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { getSocialProviders } from '../../services/authService';
+import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { socialAuthError } from '../../utils/socialAuthErrors';
 import { useAuth } from '../../hooks/useAuth';
 import { FaEnvelope, FaLock, FaSignInAlt, FaGoogle, FaFacebook } from 'react-icons/fa'; // Example icons
 import AuthLayout from '../../components/auth/AuthLayout'; // Assuming you create this
@@ -12,7 +14,24 @@ const LoginPage = () => {
     const { login, authError, loading } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
-    const from = location.state?.from?.pathname || '/dashboard';
+    const [searchParams, setSearchParams] = useSearchParams();
+    const socialError = socialAuthError(searchParams.get('error'));
+    const [providers, setProviders] = useState(null);
+    const [providerError, setProviderError] = useState(false);
+    const [providerReload, setProviderReload] = useState(0);
+    useEffect(() => {
+        const controller = new AbortController();
+        setProviders(null); setProviderError(false);
+        getSocialProviders({ signal: controller.signal }).then(response => {
+            if (controller.signal.aborted) return;
+            const options = response?.data?.data;
+            if (typeof options?.google?.available !== 'boolean' || typeof options?.facebook?.available !== 'boolean') throw new Error('Invalid social options');
+            setProviders(options);
+        }).catch(() => { if (!controller.signal.aborted) setProviderError(true); });
+        return () => controller.abort();
+    }, [providerReload]);
+    const returnLocation = location.state?.from;
+    const from = returnLocation?.pathname ? `${returnLocation.pathname}${returnLocation.search || ''}` : '/dashboard';
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -28,14 +47,19 @@ const LoginPage = () => {
     };
     
     const handleSocialLogin = (provider) => {
+        if (loading || providers?.[provider]?.available !== true) return;
         // Construct the full backend URL for Socialite redirect
         const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-        window.location.href = `${backendUrl}/api/auth/${provider}/redirect`;
+        window.location.href = `${backendUrl}/api/auth/social/${provider}/redirect`;
     };
 
 
     return (
         <AuthLayout title="Welcome Back!" subtitle="Login to access your SihaTech account.">
+            {socialError && <div role="alert" className="text-red-700 bg-red-50 p-3 rounded-md mb-4">
+                <p>{socialError}</p>
+                <button type="button" className="underline mt-2" onClick={() => setSearchParams(previous => { const next = new URLSearchParams(previous); next.delete('error'); return next; }, { replace: true })}>Dismiss sign-in message</button>
+            </div>}
             <form onSubmit={handleSubmit} className="space-y-6">
                 {authError && <p className="text-red-500 text-sm bg-red-100 p-3 rounded-md">{authError}</p>}
                 
@@ -129,8 +153,9 @@ const LoginPage = () => {
                 <div className="mt-6 grid grid-cols-2 gap-3">
                     <div>
                         <button
+                            type="button" disabled={loading || providers?.google?.available !== true}
                             onClick={() => handleSocialLogin('google')}
-                            className="w-full inline-flex justify-center items-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
+                            className="w-full inline-flex justify-center items-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <FaGoogle className="w-5 h-5 mr-2 text-red-500" />
                             Google
@@ -138,14 +163,19 @@ const LoginPage = () => {
                     </div>
                     <div>
                         <button
+                            type="button" disabled={loading || providers?.facebook?.available !== true}
                             onClick={() => handleSocialLogin('facebook')}
-                            className="w-full inline-flex justify-center items-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
+                            className="w-full inline-flex justify-center items-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                            <FaFacebook className="w-5 h-5 mr-2 text-blue-600" />
                             Facebook
                         </button>
                     </div>
                 </div>
+                {!providers && !providerError && <p role="status" className="mt-3 text-sm text-gray-600">Checking social sign-in options…</p>}
+                {providerError && <p role="alert" className="mt-3 text-sm text-gray-600">Social sign-in options could not be loaded. Email sign-in is still available. <button type="button" className="underline" onClick={() => setProviderReload(value => value + 1)}>Retry social options</button></p>}
+                {providers && !providers.google?.available && !providers.facebook?.available && <p className="mt-3 text-sm text-gray-600">Social sign-in is currently unavailable. Use email and password.</p>}
+                {providers?.facebook?.available && providers.facebook.existing_accounts_only && <p className="mt-3 text-sm text-gray-600">Facebook sign-in is available for accounts already linked to Facebook.</p>}
             </div>
 
 

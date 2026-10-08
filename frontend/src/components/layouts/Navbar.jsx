@@ -1,102 +1,45 @@
-// src/components/layouts/Navbar.jsx
-import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../../hooks/useAuth'; // Corrected path
-import { FaUserCircle, FaSignOutAlt, FaTachometerAlt, FaSignInAlt, FaUserPlus } from 'react-icons/fa'; // Example icons
+import { useState } from 'react';
+import { Link, NavLink } from 'react-router-dom';
+import { useAuth } from '../../hooks/useAuth';
+import './Navbar.css';
 
-const Navbar = () => {
-    const { user, logout } = useAuth();
-    const navigate = useNavigate();
-
-    const handleLogout = async () => {
-        await logout();
-        // Navigation is handled within the logout function in AuthContext
-    };
-
-    const getDashboardPath = () => {
-        if (!user) return '/';
-        switch (user.role) {
-            case 'admin':
-                return '/admin/dashboard';
-            case 'doctor':
-                return '/doctor/dashboard';
-            case 'patient':
-                return '/patient/dashboard';
-            default:
-                return '/dashboard'; // A generic dashboard or redirector component
+export default function Navbar() {
+    const { user, logout, loading, authError } = useAuth();
+    const [open, setOpen] = useState(false);
+    const rolePath = { patient: 'patient', medecin: 'doctor', admin: 'admin' }[user?.role];
+    const links = [
+        { to: '/', label: 'Home' },
+        { to: '/doctors', label: 'Find a doctor' },
+        { to: '/subscription-plans', label: 'Plans' },
+    ];
+    if (user) {
+        links.push({ to: '/my-subscription', label: 'Subscription' });
+        links.push({ to: rolePath ? `/${rolePath}/dashboard` : '/dashboard', label: 'Dashboard' });
+        if (['patient', 'doctor'].includes(rolePath)) {
+            links.push({ to: `/${rolePath}/appointments`, label: 'Appointments' });
+            links.push({ to: `/${rolePath}/profile`, label: 'Profile' });
         }
-    };
-    
-    const getProfilePath = () => {
-        if (!user) return '/login';
-        switch (user.role) {
-            case 'admin':
-                return '/admin/profile'; // Assuming an admin profile page
-            case 'doctor':
-                return '/doctor/profile';
-            case 'patient':
-                return '/patient/profile';
-            default:
-                return '/profile'; 
+        if (rolePath === 'doctor') {
+            links.push({ to: '/doctor/availability', label: 'Availability' }, { to: '/doctor/documents', label: 'Documents' }, { to: '/doctor/statistics', label: 'Statistics' });
         }
-    };
+        if (rolePath === 'admin') links.push({ to: '/admin/users', label: 'Users' }, { to: '/admin/doctors-verification', label: 'Doctor verification' }, { to: '/admin/audit-logs', label: 'Audit history' }, { to: '/admin/specialities', label: 'Specialities' }, { to: '/admin/languages', label: 'Languages' }, { to: '/admin/reviews', label: 'Review moderation' }, { to: '/admin/subscription-plans', label: 'Plan management' }, { to: '/admin/reports', label: 'Reports' });
+    } else {
+        links.push({ to: '/login', label: 'Sign in' }, { to: '/register', label: 'Create account' });
+    }
 
+    async function signOut() {
+        if (await logout()) setOpen(false);
+    }
 
-    return (
-        <nav className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white shadow-lg">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex items-center justify-between h-20">
-                    <div className="flex items-center">
-                        <Link to="/" className="text-2xl font-bold tracking-tight hover:text-indigo-200 transition duration-150">
-                           SIHA<span className="text-blue-300">TECH</span>
-                        </Link>
-                    </div>
-                    <div className="hidden md:block">
-                        <div className="ml-10 flex items-baseline space-x-4">
-                            <Link to="/" className="px-3 py-2 rounded-md text-sm font-medium hover:bg-indigo-500 hover:bg-opacity-75 transition duration-150">Home</Link>
-                            <Link to="/doctors" className="px-3 py-2 rounded-md text-sm font-medium hover:bg-indigo-500 hover:bg-opacity-75 transition duration-150">Find a Doctor</Link>
-                            <Link to="/subscription-plans" className="px-3 py-2 rounded-md text-sm font-medium hover:bg-indigo-500 hover:bg-opacity-75 transition duration-150">Plans</Link>
-                            {/* Add more public links as needed */}
-                        </div>
-                    </div>
-                    <div className="hidden md:block">
-    <div className="ml-4 flex items-center md:ml-6">
-        {user ? (
-            <>
-                <span className="mr-3 text-sm">
-                    Welcome, {user.first_name || user.name || 'User'} ({user.role})
-                </span>
-                <Link to={getDashboardPath()} className="p-2 rounded-full hover:bg-indigo-500 hover:bg-opacity-75 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-indigo-700 focus:ring-white transition duration-150" title="Dashboard">
-                    <FaTachometerAlt className="h-6 w-6" />
-                </Link>
-                <Link to={getProfilePath()} className="ml-3 p-2 rounded-full hover:bg-indigo-500 hover:bg-opacity-75 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-indigo-700 focus:ring-white transition duration-150" title="Profile">
-                    <FaUserCircle className="h-6 w-6" />
-                </Link>
-                <button
-                    onClick={handleLogout}
-                    className="ml-3 p-2 rounded-full text-red-300 hover:bg-red-500 hover:text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-indigo-700 focus:ring-white transition duration-150"
-                    title="Logout"
-                >
-                    <FaSignOutAlt className="h-6 w-6" />
-                </button>
-            </>
-        ) : (
-            <>
-                <Link to="/login" className="flex items-center px-3 py-2 rounded-md text-sm font-medium hover:bg-indigo-500 hover:bg-opacity-75 transition duration-150">
-                    <FaSignInAlt className="mr-1" /> Login
-                </Link>
-                <Link to="/register" className="flex items-center ml-2 px-3 py-2 rounded-md text-sm font-medium bg-gradient-to-r from-blue-500 to-indigo-500 text-white hover:from-blue-600 hover:to-indigo-600 shadow transition duration-150">
-                   <FaUserPlus className="mr-1" /> Sign Up
-                </Link>
-            </>
-        )}
-    </div>
-</div>
-                    {/* Mobile menu button (implement if needed) */}
-                </div>
-            </div>
-        </nav>
-    );
-};
-
-export default Navbar;
+    return <header className="site-navigation">
+        <div className="site-navigation-inner">
+            <Link to="/" className="site-brand" onClick={() => setOpen(false)}>SIHATECH</Link>
+            <button type="button" className="site-menu-toggle" aria-controls="site-navigation-links" aria-expanded={open} onClick={() => setOpen(value => !value)}>{open ? 'Close menu' : 'Menu'}</button>
+            <nav id="site-navigation-links" aria-label="Main navigation" className={`site-navigation-links ${open ? 'is-open' : ''}`}>
+                {links.map(link => <NavLink key={link.to} to={link.to} end={link.to === '/'} onClick={() => setOpen(false)}>{link.label}</NavLink>)}
+                {user && <button disabled={loading} onClick={signOut}>{loading ? 'Signing out…' : 'Sign out'}</button>}
+            </nav>
+        </div>
+        {user && authError && <p role="alert" className="site-navigation-error">{authError}</p>}
+    </header>;
+}

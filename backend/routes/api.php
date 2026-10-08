@@ -1,28 +1,31 @@
 <?php
 
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Auth\AuthenticatedSessionController;
-use App\Http\Controllers\Auth\RegisteredUserController;
-use App\Http\Controllers\Auth\AdminAuthController;
-use App\Http\Controllers\Auth\VerifyEmailController;
-use App\Http\Controllers\Auth\EmailVerificationNotificationController;
-use App\Http\Controllers\Auth\SocialiteAuthController;
-use App\Http\Controllers\Auth\PasswordResetLinkController;
-use App\Http\Controllers\Auth\NewPasswordController;
-use App\Http\Controllers\Patient\ProfileController as PatientProfileController;
-use App\Http\Controllers\Doctor\ProfileController as DoctorProfileController;
-use App\Http\Controllers\Doctor\DocumentController;
-use App\Http\Controllers\Doctor\StatisticsController as DoctorStatisticsController;
-use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\AdminController;
+use App\Http\Controllers\Admin\AuditLogController;
+use App\Http\Controllers\Admin\CatalogueController;
 use App\Http\Controllers\Admin\DoctorVerificationController;
+use App\Http\Controllers\Admin\PlanController;
+use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Api\AppointmentController;
 use App\Http\Controllers\Api\AvailabilityController;
+use App\Http\Controllers\Auth\AdminAuthController;
+use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Auth\EmailVerificationNotificationController;
+use App\Http\Controllers\Auth\NewPasswordController;
+use App\Http\Controllers\Auth\PasswordResetLinkController;
+use App\Http\Controllers\Auth\RegisteredUserController;
+use App\Http\Controllers\Doctor\DocumentController;
+use App\Http\Controllers\Doctor\ProfileController as DoctorProfileController;
+use App\Http\Controllers\Doctor\StatisticsController as DoctorStatisticsController;
 use App\Http\Controllers\DoctorController;
-use App\Http\Controllers\SubscriptionController;
+use App\Http\Controllers\Patient\ProfileController as PatientProfileController;
 use App\Http\Controllers\ReportController;
+use App\Http\Controllers\ReviewController;
+use App\Http\Controllers\SubscriptionController;
 use App\Http\Controllers\Webhooks\StripeWebhookController;
+use App\Services\SocialProviders;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
@@ -40,18 +43,14 @@ Route::middleware('guest')->group(function () {
     Route::post('/register', [RegisteredUserController::class, 'store'])->name('api.register');
     Route::post('/login', [AuthenticatedSessionController::class, 'store'])->name('api.login');
     Route::post('/admin/login', [AdminAuthController::class, 'login'])->name('api.admin.login');
-    Route::post('/forgot-password', [PasswordResetLinkController::class, 'store'])->name('api.password.email');
-    Route::post('/reset-password', [NewPasswordController::class, 'store'])->name('api.password.update');
+    Route::post('/forgot-password', [PasswordResetLinkController::class, 'store'])->middleware('throttle:password-recovery')->name('api.password.email');
+    Route::post('/reset-password', [NewPasswordController::class, 'store'])->middleware('throttle:password-reset')->name('api.password.update');
 
-    // Social Authentication
-    Route::get('/auth/social/{provider}/redirect', [SocialiteAuthController::class, 'redirect'])
-        ->name('auth.social.redirect'); // Removed .where constraint
-    Route::get('/auth/social/{provider}/callback', [SocialiteAuthController::class, 'callback'])
-        ->name('auth.social.callback'); // Removed .where constraint
 });
 
 // Public Routes (No Authentication Required)
 Route::group(['prefix' => 'public'], function () {
+    Route::get('/auth/providers', fn () => response()->json(['data' => app(SocialProviders::class)->publicOptions()], 200, ['Cache-Control' => 'no-store']));
     // Public Doctor Information
     Route::get('/doctors', [DoctorController::class, 'index'])->name('api.public.doctors.index');
     Route::get('/doctors/search', [DoctorController::class, 'search'])->name('api.public.doctors.search');
@@ -66,17 +65,8 @@ Route::group(['prefix' => 'public'], function () {
     Route::get('/locations', [DoctorController::class, 'locations'])->name('api.public.locations');
 });
 
-// Email Verification Routes (Signed URLs)
-Route::group(['prefix' => 'email'], function () {
-    Route::get('/verify/{id}/{hash}', [VerifyEmailController::class, '__invoke'])
-        ->middleware(['signed', 'throttle:6,1'])
-        ->name('verification.verify')->where('id', '[0-9]+');
-    Route::get('/verify/error', [VerifyEmailController::class, 'error'])
-        ->name('verification.error');
-});
-
 // Authenticated Routes (Sanctum Protected)
-Route::middleware(['auth:sanctum'])->group(function () {
+Route::middleware(['auth:sanctum', 'current.session'])->group(function () {
     // Basic Auth Routes
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('api.logout');
     Route::post('/admin/logout', [AdminAuthController::class, 'logout'])->name('api.admin.logout');
@@ -105,6 +95,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
                 'average_rating' => $user->doctor->average_rating,
                 'total_reviews' => $user->doctor->total_reviews,
             ];
+            $userData['doctor_profile_completed'] = $user->doctor->speciality_id !== null;
         } elseif ($user->role === 'patient' && $user->patient) {
             $userData['patient'] = [
                 'id' => $user->patient->id,
@@ -118,7 +109,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
         return response()->json([
             'user' => $userData,
-            'role' => $user->role
+            'role' => $user->role,
         ]);
     })->name('api.user');
 
@@ -149,6 +140,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::put('/profile/password', [PatientProfileController::class, 'updatePassword'])->name('api.patient.profile.password');
             Route::post('/profile/photo', [PatientProfileController::class, 'updatePhoto'])->name('api.patient.profile.photo');
 
+            Route::get('/reviews', [ReviewController::class, 'index']);
+            Route::get('/appointments/{appointment}/review', [ReviewController::class, 'context'])->whereNumber('appointment');
+            Route::post('/appointments/{appointment}/review', [ReviewController::class, 'store'])->whereNumber('appointment')->middleware('throttle:10,1');
+
             // Patient Appointments
             Route::get('/appointments', [AppointmentController::class, 'getAppointments'])->name('api.patient.appointments.index');
             Route::post('/doctors/{doctorId}/appointments', [AppointmentController::class, 'bookAppointment'])->name('api.patient.appointments.book')->where('doctorId', '[0-9]+');
@@ -165,6 +160,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::put('/languages', [DoctorController::class, 'updateLanguages'])->name('api.doctor.languages.update');
 
             // Document Management
+            Route::get('/documents/{document}/download', [DocumentController::class, 'download'])->whereNumber('document');
             Route::get('/documents', [DocumentController::class, 'index'])->name('api.doctor.documents.index');
             Route::post('/documents', [DocumentController::class, 'store'])->name('api.doctor.documents.store');
             Route::get('/documents/{id}', [DocumentController::class, 'show'])->name('api.doctor.documents.show')->where('id', '[0-9]+');
@@ -198,26 +194,39 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::group(['prefix' => 'admin', 'middleware' => 'role:admin'], function () {
             // Dashboard
             Route::get('/dashboard', [AdminController::class, 'dashboard'])->name('api.admin.dashboard');
+            Route::get('/audit-logs', [AuditLogController::class, 'index'])->name('api.admin.audit-logs');
+            foreach (['specialities', 'languages'] as $catalogue) {
+                Route::get('/'.$catalogue, [CatalogueController::class, 'index'])->defaults('catalogue', $catalogue);
+                Route::post('/'.$catalogue, [CatalogueController::class, 'store'])->defaults('catalogue', $catalogue);
+                Route::put('/'.$catalogue.'/{id}', [CatalogueController::class, 'update'])->whereNumber('id')->defaults('catalogue', $catalogue);
+            }
 
             // User Data Export (Define specific route before parameterized one)
             Route::get('/users/export', [AdminController::class, 'exportUserData'])->name('api.admin.users.export');
 
             // User Management
             Route::get('/users', [UserController::class, 'index'])->name('api.admin.users.index');
-            Route::post('/users/admin', [UserController::class, 'storeAdmin'])->name('api.admin.users.store-admin');
+            Route::post('/users/admin', [UserController::class, 'storeAdmin'])->middleware('throttle:admin-creation')->name('api.admin.users.store-admin');
             Route::get('/users/{id}', [UserController::class, 'show'])->name('api.admin.users.show')->where('id', '[0-9]+');
             Route::put('/users/{id}/status', [UserController::class, 'updateStatus'])->name('api.admin.users.update-status')->where('id', '[0-9]+');
-            Route::put('/users/{id}/password', [UserController::class, 'resetPassword'])->name('api.admin.users.reset-password')->where('id', '[0-9]+');
+            Route::put('/users/{id}/password', [UserController::class, 'resetPassword'])->middleware('throttle:admin-credential-reset')->name('api.admin.users.reset-password')->where('id', '[0-9]+');
             Route::delete('/users/{id}', [UserController::class, 'destroy'])->name('api.admin.users.destroy')->where('id', '[0-9]+');
             Route::put('/admins/{id}/status', [UserController::class, 'updateAdminStatus'])->name('api.admin.admins.update-status')->where('id', '[0-9]+');
 
+            Route::get('/subscription-plans', [PlanController::class, 'index']);
+            Route::post('/subscription-plans', [PlanController::class, 'store']);
+            Route::put('/subscription-plans/{id}', [PlanController::class, 'update'])->whereNumber('id');
 
             // Reviews Management
-            Route::get('/reviews/pending', [AdminController::class, 'getPendingReviews'])->name('api.admin.reviews.pending');
-            Route::post('/reviews/{review}/moderate', [AdminController::class, 'moderateReview'])->name('api.admin.reviews.moderate')->where('review', '[0-9]+');
+            Route::get('/reviews', [ReviewController::class, 'adminIndex']);
+            Route::get('/reviews/pending', [ReviewController::class, 'pending'])->name('api.admin.reviews.pending');
+            Route::post('/reviews/{review}/moderate', [ReviewController::class, 'moderate'])->name('api.admin.reviews.moderate')->where('review', '[0-9]+');
 
             // Doctor Verification
+            Route::get('/documents/{document}/download', [DoctorVerificationController::class, 'downloadDocument'])->whereNumber('document');
             Route::get('/doctors/pending', [DoctorVerificationController::class, 'pendingDoctors'])->name('api.admin.doctors.pending');
+            Route::get('/doctors', [DoctorVerificationController::class, 'index']);
+            Route::get('/doctors/{doctor}', [DoctorVerificationController::class, 'show'])->whereNumber('doctor');
             Route::get('/documents/pending', [DoctorVerificationController::class, 'pendingDocuments'])->name('api.admin.documents.pending');
             Route::get('/documents/{id}', [DoctorVerificationController::class, 'showDocument'])->name('api.admin.documents.show')->where('id', '[0-9]+');
             Route::post('/documents/{id}/approve', [DoctorVerificationController::class, 'approveDocument'])->name('api.admin.documents.approve')->where('id', '[0-9]+');
@@ -232,11 +241,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::get('/reports/financial', [ReportController::class, 'financialStats'])->name('api.admin.reports.financial');
             Route::get('/reports/appointments', [ReportController::class, 'rendezvousStats'])->name('api.admin.reports.appointments');
             Route::get('/reports/export/financial', [ReportController::class, 'exportFinancialReport'])->name('api.admin.reports.export.financial');
+            Route::get('/reports/export/appointments', [ReportController::class, 'exportAppointmentReport'])->name('api.admin.reports.export.appointments');
         });
 
         // Subscription Routes (for all authenticated users)
         Route::group(['prefix' => 'subscriptions'], function () {
-            Route::get('/plans', [SubscriptionController::class, 'getPlans'])->name('api.subscriptions.plans');
+
             Route::get('/setup-intent', [SubscriptionController::class, 'getSetupIntent'])->name('api.subscriptions.setup-intent');
             Route::post('/subscribe', [SubscriptionController::class, 'subscribe'])->name('api.subscriptions.subscribe');
             Route::post('/cancel', [SubscriptionController::class, 'cancelSubscription'])->name('api.subscriptions.cancel');
@@ -251,6 +261,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
     });
 });
 
+Route::get('/subscriptions/plans', [SubscriptionController::class, 'getPlans'])->name('api.subscriptions.plans');
+
 // Fallback route for undefined API endpoints
 Route::fallback(function () {
     return response()->json([
@@ -262,7 +274,7 @@ Route::fallback(function () {
             'patient' => '/api/patient/profile, /api/patient/appointments',
             'doctor' => '/api/doctor/profile, /api/doctor/appointments, /api/doctor/documents, /api/doctor/stats',
             'admin' => '/api/admin/dashboard, /api/admin/users, /api/admin/doctors/pending',
-            'subscriptions' => '/api/subscriptions/plans, /api/subscriptions/current'
-        ]
+            'subscriptions' => '/api/subscriptions/plans, /api/subscriptions/current',
+        ],
     ], 404);
 });

@@ -1,5 +1,5 @@
 // src/components/auth/ForgotPasswordPage.jsx
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from '../../api/axios'; // Using the global axios instance
 import AuthLayout from './AuthLayout';
@@ -19,9 +19,11 @@ const ForgotPasswordPage = () => {
         try {
             await axios.get('/sanctum/csrf-cookie');
             const response = await axios.post('/api/forgot-password', { email });
-            setMessage(response.data.message || 'Password reset link sent! Please check your email.');
+            setMessage(response.data.message || 'If an account matches this email, a password reset link will be sent. Check your inbox and spam folder.');
         } catch (err) {
-            setError(err.response?.data?.message || err.response?.data?.email?.[0] || 'Failed to send reset link. Please try again.');
+            setError(err.response?.status === 429
+                ? 'Too many reset requests. Wait a minute before trying again.'
+                : err.response?.data?.errors?.email?.[0] || 'We could not process your request. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -30,8 +32,8 @@ const ForgotPasswordPage = () => {
     return (
         <AuthLayout title="Forgot Your Password?" subtitle="Enter your email and we'll send you a reset link.">
             <form onSubmit={handleSubmit} className="space-y-6">
-                {message && <p className="text-green-600 bg-green-100 p-3 rounded-md text-sm">{message}</p>}
-                {error && <p className="text-red-500 bg-red-100 p-3 rounded-md text-sm">{error}</p>}
+                {message && <p role="status" className="text-green-600 bg-green-100 p-3 rounded-md text-sm">{message}</p>}
+                {error && <p role="alert" className="text-red-500 bg-red-100 p-3 rounded-md text-sm">{error}</p>}
                 <div>
                     <label htmlFor="email" className="block text-sm font-medium text-gray-700">
                         Email address

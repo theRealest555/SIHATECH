@@ -25,44 +25,17 @@ class ProcessPayment implements ShouldQueue
 
     public function handle(StripePaymentService $stripeService): void
     {
-        try {
-            if ($this->payment->status === 'completed' || $this->payment->status === 'failed') {
-                return;
-            }
-
-            $this->payment->update(['status' => 'completed']);
-
-            if ($this->payment->user) {
-                $this->payment->user->notify(new PaymentSuccessNotification($this->payment));
-            }
-
-            if ($this->payment->user_subscription_id && $this->payment->userSubscription) {
-                $this->payment->userSubscription->update(['status' => 'active']);
-            }
-
-        } catch (\Exception $e) {
-            $this->payment->update([
-                'status' => 'failed',
-                'payment_data' => array_merge($this->payment->payment_data ?? [], [
-                    'error' => $e->getMessage(),
-                    'failed_at' => now()->toISOString(),
-                ])
-            ]);
-
-            if ($this->attempts() < 3) {
-                $this->release(60);
-            }
+        // Entitlement is reconciled only by a verified provider event, never by
+        // merely receiving a queue job. This job only delivers confirmed receipts.
+        $this->payment->refresh();
+        if ($this->payment->status !== 'completed') {
+            return;
         }
+        $this->payment->user?->notify(new PaymentSuccessNotification($this->payment));
     }
 
     public function failed(\Throwable $exception): void
     {
-        $this->payment->update([
-            'status' => 'failed',
-            'payment_data' => array_merge($this->payment->payment_data ?? [], [
-                'final_error' => $exception->getMessage(),
-                'permanently_failed_at' => now()->toISOString(),
-            ])
-        ]);
+        Log::error('Receipt delivery failed', ['payment_id' => $this->payment->id]);
     }
 }

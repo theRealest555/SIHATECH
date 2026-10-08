@@ -2,20 +2,21 @@
 
 namespace Tests\Feature\Doctor;
 
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\TestCase;
-use App\Models\User;
 use App\Models\Doctor;
 use App\Models\Leave;
 use App\Models\Rendezvous;
-use Laravel\Sanctum\Sanctum;
+use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Sanctum\Sanctum;
+use Tests\TestCase;
 
 class AvailabilityControllerTest extends TestCase
 {
     use RefreshDatabase;
 
     protected User $doctorUser;
+
     protected Doctor $doctor;
 
     protected function setUp(): void
@@ -44,7 +45,7 @@ class AvailabilityControllerTest extends TestCase
             'mardi' => ['10:00-14:00'],
         ];
 
-        $response = $this->putJson('/api/doctor/schedule', ['schedule' => $newSchedule]); //
+        $response = $this->putJson('/api/doctor/schedule', ['expected_schedule_revision' => $this->getJson('/api/doctor/availability')->json('data.schedule_revision'), 'schedule' => $newSchedule]); //
 
         $response->assertStatus(200)
             ->assertJsonPath('status', 'success')
@@ -53,7 +54,7 @@ class AvailabilityControllerTest extends TestCase
 
         $this->assertDatabaseHas('doctors', [
             'id' => $this->doctor->id,
-            'horaires' => json_encode($newSchedule)
+            'horaires' => json_encode($newSchedule),
         ]);
     }
 
@@ -63,20 +64,19 @@ class AvailabilityControllerTest extends TestCase
         Rendezvous::factory()->create([
             'doctor_id' => $this->doctor->id,
             'date_heure' => Carbon::parse('next monday 10:00'),
-            'statut' => 'confirmé'
+            'statut' => 'confirmé',
         ]);
 
         $newConflictingSchedule = [
             'lundi' => ['14:00-18:00'], // This would conflict with 10:00 appointment
         ];
 
-        $response = $this->putJson('/api/doctor/schedule', ['schedule' => $newConflictingSchedule]); //
+        $response = $this->putJson('/api/doctor/schedule', ['expected_schedule_revision' => $this->getJson('/api/doctor/availability')->json('data.schedule_revision'), 'schedule' => $newConflictingSchedule]); //
 
         $response->assertStatus(409) // Conflict
             ->assertJsonPath('status', 'error')
             ->assertJsonPath('message', 'Le nouvel horaire entre en conflit avec des rendez-vous existants.');
     }
-
 
     public function test_doctor_can_create_a_leave_period()
     {
@@ -94,16 +94,16 @@ class AvailabilityControllerTest extends TestCase
 
         $this->assertDatabaseHas('leaves', [
             'doctor_id' => $this->doctor->id,
-            'reason' => 'Vacation'
+            'reason' => 'Vacation',
         ]);
     }
 
-     public function test_doctor_cannot_create_leave_if_it_conflicts_with_appointments()
+    public function test_doctor_cannot_create_leave_if_it_conflicts_with_appointments()
     {
         Rendezvous::factory()->create([
             'doctor_id' => $this->doctor->id,
-            'date_heure' => Carbon::today()->addDays(3)->setTime(10,0),
-            'statut' => 'confirmé'
+            'date_heure' => Carbon::today()->addDays(3)->setTime(10, 0),
+            'statut' => 'confirmé',
         ]);
 
         $leaveData = [
@@ -123,7 +123,7 @@ class AvailabilityControllerTest extends TestCase
     {
         $leave = Leave::factory()->create(['doctor_id' => $this->doctor->id]);
 
-        $response = $this->deleteJson('/api/doctor/leaves/' . $leave->id); //
+        $response = $this->deleteJson('/api/doctor/leaves/'.$leave->id); //
 
         $response->assertStatus(200)
             ->assertJsonPath('status', 'success')
@@ -136,7 +136,7 @@ class AvailabilityControllerTest extends TestCase
         $this->doctor->update(['is_verified' => false]);
         Sanctum::actingAs($this->doctorUser->refresh()); // Refresh user to get updated doctor state
 
-        $response = $this->putJson('/api/doctor/schedule', ['schedule' => ['lundi' => ['10:00-11:00']]]); //
+        $response = $this->putJson('/api/doctor/schedule', ['expected_schedule_revision' => $this->getJson('/api/doctor/availability')->json('data.schedule_revision'), 'schedule' => ['lundi' => ['10:00-11:00']]]); //
         $response->assertStatus(403); // Forbidden due to VerifiedDoctor middleware
     }
 }

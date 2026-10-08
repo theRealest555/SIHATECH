@@ -2,162 +2,64 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Payment;
-use App\Models\UserSubscription;
-use App\Models\User;
-use App\Models\Rendezvous;
-use App\Exports\FinancialReportExport;
+use App\Services\AdminReportService;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Response;
-use Carbon\Carbon;
-use Illuminate\Support\Facades\DB; // Import DB Facade
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class ReportController extends Controller
 {
-    public function financialStats(Request $request): JsonResponse
+    private function report(Request $request, string $type): array
     {
-        $startDate = $request->get('start_date', now()->startOfMonth());
-        $endDate = $request->get('end_date', now()->endOfMonth());
+        $data = $request->validate([
+            'start_date' => 'nullable|required_with:end_date|date_format:Y-m-d',
+            'end_date' => 'nullable|required_with:start_date|date_format:Y-m-d|after_or_equal:start_date',
+        ]);
+        $start = isset($data['start_date']) ? CarbonImmutable::parse($data['start_date'])->startOfDay() : CarbonImmutable::now()->startOfMonth();
+        $end = isset($data['end_date']) ? CarbonImmutable::parse($data['end_date'])->startOfDay() : CarbonImmutable::now()->endOfMonth()->startOfDay();
+        if ($start->diffInDays($end) > 365) {
+            throw ValidationException::withMessages(['end_date' => 'Select a maximum of 366 days.']);
+        }
 
-        $stats = [
-            'total_revenue' => Payment::where('status', 'completed')
-                ->whereBetween('created_at', [$startDate, $endDate])
-                ->sum('amount'),
-            'subscription_revenue' => Payment::whereHas('userSubscription')
-                ->where('status', 'completed')
-                ->whereBetween('created_at', [$startDate, $endDate])
-                ->sum('amount'),
-            'active_subscriptions' => UserSubscription::where('status', 'active')->count(),
-            'new_subscriptions' => UserSubscription::whereBetween('created_at', [$startDate, $endDate])->count(),
-            'cancelled_subscriptions' => UserSubscription::where('status', 'cancelled')
-                ->whereBetween('cancelled_at', [$startDate, $endDate])
-                ->count(),
-            'payment_methods' => Payment::where('status', 'completed')
-                ->whereBetween('created_at', [$startDate, $endDate])
-                ->groupBy('payment_method')
-                ->selectRaw('payment_method, count(*) as count, sum(amount) as total')
-                ->get()
-        ];
-
-        return response()->json(['data' => $stats]);
+        return DB::transaction(fn () => app(AdminReportService::class)->{$type}($start, $end));
     }
 
-    public function rendezvousStats(Request $request): JsonResponse
+    public function financialStats(Request $request)
     {
-        $startDate = $request->get('start_date', now()->startOfMonth());
-        $endDate = $request->get('end_date', now()->endOfMonth());
+        return response()->json(['data' => $this->report($request, 'financial')], 200, ['Cache-Control' => 'private, no-store']);
+    }
 
-        $stats = [
-            'total_rendezvouss' => Rendezvous::whereBetween('created_at', [$startDate, $endDate])->count(),
-            'confirmed_rendezvouss' => Rendezvous::where('statut', 'confirmé')
-                ->whereBetween('created_at', [$startDate, $endDate])
-                ->count(),
-            'cancelled_rendezvouss' => Rendezvous::where('statut', 'annulé')
-                ->whereBetween('created_at', [$startDate, $endDate])
-                ->count(),
-            'completion_rate' => $this->calculateCompletionRate($startDate, $endDate),
-            'popular_specialties' => $this->getPopularSpecialties($startDate, $endDate),
-            'peak_hours' => $this->getPeakHours($startDate, $endDate)
-        ];
-
-        return response()->json(['data' => $stats]);
+    public function rendezvousStats(Request $request)
+    {
+        return response()->json(['data' => $this->report($request, 'appointments')], 200, ['Cache-Control' => 'private, no-store']);
     }
 
     public function exportFinancialReport(Request $request)
     {
-        $format = $request->get('format', 'csv');
-        $startDate = $request->get('start_date', now()->startOfMonth());
-        $endDate = $request->get('end_date', now()->endOfMonth());
-
-        $data = $this->getFinancialReportData($startDate, $endDate);
-
-        if ($format === 'csv') {
-            $export = new FinancialReportExport($data);
-
-            $headers = [
-                'Content-Type' => 'text/csv; charset=UTF-8',
-                'Content-Disposition' => 'attachment; filename="rapport_financier_' . now()->format('Y-m-d') . '.csv"'
-            ];
-
-            $callback = function() use ($export) {
-                $file = fopen('php://output', 'w');
-                // Add UTF-8 BOM for better Excel compatibility with special characters
-                fputs($file, "\xEF\xBB\xBF");
-
-                // Add headers
-                fputcsv($file, $export->headings());
-
-                // Add data
-                foreach ($export->collection() as $row) {
-                    fputcsv($file, $row->toArray());
-                }
-
-                fclose($file);
-            };
-
-            return Response::stream($callback, 200, $headers);
-        }
-
-        // For any other format, return 501 Not Implemented
-        return response()->json([
-            'message' => 'The requested export format is not supported. Please use CSV.',
-            'requested_format' => $format
-        ], 501);
+        return $this->export($request, 'financial');
     }
 
-    private function calculateCompletionRate($startDate, $endDate): float
+    public function exportAppointmentReport(Request $request)
     {
-        $total = Rendezvous::whereBetween('created_at', [$startDate, $endDate])->count();
-        $completed = Rendezvous::where('statut', 'terminé')
-            ->whereBetween('created_at', [$startDate, $endDate])
-            ->count();
-
-        return $total > 0 ? round(($completed / $total) * 100, 2) : 0;
+        return $this->export($request, 'appointments');
     }
 
-    private function getPopularSpecialties($startDate, $endDate)
+    private function export(Request $request, string $type)
     {
-        return Rendezvous::join('doctors', 'rendezvous.doctor_id', '=', 'doctors.id')
-            ->join('specialities', 'doctors.speciality_id', '=', 'specialities.id')
-            ->whereBetween('rendezvous.created_at', [$startDate, $endDate])
-            ->groupBy('specialities.nom')
-            ->selectRaw('specialities.nom as specialty, count(*) as count')
-            ->orderByDesc('count')
-            ->limit(5)
-            ->get();
-    }
+        $request->validate(['format' => 'nullable|in:csv']);
+        $data = $this->report($request, $type);
+        $rows = app(AdminReportService::class)->csvRows($type, $data);
 
-    private function getPeakHours($startDate, $endDate)
-    {
-        // Use database-agnostic way to extract hour
-        $hourExpression = DB::connection()->getDriverName() === 'sqlite'
-            ? "strftime('%H', date_heure)"
-            : "HOUR(date_heure)";
-
-        return Rendezvous::whereBetween('created_at', [$startDate, $endDate])
-            ->selectRaw("{$hourExpression} as hour, count(*) as count")
-            ->groupBy('hour')
-            ->orderByDesc('count')
-            ->limit(10)
-            ->get();
-    }
-
-    private function getFinancialReportData($startDate, $endDate)
-    {
-        return [
-            'payments' => Payment::with(['user', 'userSubscription.subscriptionPlan'])
-                ->whereBetween('created_at', [$startDate, $endDate])
-                ->get(),
-            'subscriptions' => UserSubscription::with(['user', 'subscriptionPlan'])
-                ->whereBetween('created_at', [$startDate, $endDate])
-                ->get(),
-            'summary' => [
-                'total_revenue' => Payment::where('status', 'completed')
-                    ->whereBetween('created_at', [$startDate, $endDate])
-                    ->sum('amount'),
-                'total_transactions' => Payment::whereBetween('created_at', [$startDate, $endDate])->count()
-            ]
-        ];
+        return response()->streamDownload(function () use ($rows) {
+            $file = fopen('php://output', 'w');
+            fwrite($file, "\xEF\xBB\xBF");
+            foreach ($rows as $row) {
+                // Quoting does not prevent spreadsheet formula execution.
+                $safe = array_map(fn ($cell) => is_string($cell) && preg_match('/^[\s\x00-\x1F]*[=+@-]/u', $cell) ? "'".$cell : $cell, $row);
+                fputcsv($file, $safe, ',', '"', '');
+            }
+            fclose($file);
+        }, 'admin-'.$type.'-'.$data['range']['start_date'].'-'.$data['range']['end_date'].'.csv', ['Content-Type' => 'text/csv; charset=UTF-8', 'Cache-Control' => 'private, no-store']);
     }
 }

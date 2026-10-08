@@ -1,4 +1,4 @@
-import React from 'react';
+import PropTypes from 'prop-types';
 import { Form } from 'react-bootstrap';
 import { format, parse } from 'date-fns';
 
@@ -14,5 +14,7 @@ function DatePicker({ date, setDate }) {
     </Form.Group>
   );
 }
+
+DatePicker.propTypes = { date: PropTypes.instanceOf(Date).isRequired, setDate: PropTypes.func.isRequired };
 
 export default DatePicker;

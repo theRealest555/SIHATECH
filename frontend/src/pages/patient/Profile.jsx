@@ -1,3 +1,4 @@
+import DoctorAvatar from '../../components/ui/DoctorAvatar';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -45,6 +46,7 @@ const PatientProfile = () => {
   const appointmentError = useSelector(selectPatientError);
 
   // Local state
+  const [emailPassword, setEmailPassword] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({
     nom: '',
@@ -84,26 +86,28 @@ const PatientProfile = () => {
 
   // Update form data when profile loads
   useEffect(() => {
-    if (profile) {
+    if (profile && !isEditing) {
       setFormData({
+        expected_profile_revision: profile.profile_revision,
         nom: profile.user?.nom || '',
         prenom: profile.user?.prenom || '',
         email: profile.user?.email || '',
         telephone: profile.user?.telephone || '',
         adresse: profile.user?.adresse || '',
         sexe: profile.user?.sexe || '',
-        date_de_naissance: profile.user?.date_de_naissance || '',
+        date_de_naissance: profile.user?.date_de_naissance?.split('T')[0] || '',
         medecin_favori_id: profile.patient?.medecin_favori_id || '',
       });
     }
-  }, [profile]);
+  }, [profile, isEditing]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
   };
 
-  const handleEdit = () => {
+  const handleEdit = event => {
+    event.preventDefault();
     setIsEditing(true);
     setSuccess(false);
   };
@@ -111,13 +115,14 @@ const PatientProfile = () => {
   const handleCancel = () => {
     if (profile) {
       setFormData({
+        expected_profile_revision: profile.profile_revision,
         nom: profile.user?.nom || '',
         prenom: profile.user?.prenom || '',
         email: profile.user?.email || '',
         telephone: profile.user?.telephone || '',
         adresse: profile.user?.adresse || '',
         sexe: profile.user?.sexe || '',
-        date_de_naissance: profile.user?.date_de_naissance || '',
+        date_de_naissance: profile.user?.date_de_naissance?.split('T')[0] || '',
         medecin_favori_id: profile.patient?.medecin_favori_id || '',
       });
     }
@@ -126,11 +131,16 @@ const PatientProfile = () => {
 
   const handleSave = (e) => {
     e.preventDefault();
-    dispatch(updateUserProfile(formData))
+    dispatch(updateUserProfile({ ...formData, current_password: formData.email !== profile?.user?.email ? emailPassword : undefined }))
       .unwrap()
-      .then(() => {
+      .then(result => {
+        setEmailPassword('');
+        if (result.email_verification_required) {
+          navigate('/verify-email', { replace: true });
+          return;
+        }
         setIsEditing(false);
-        setSuccess(true);
+        setSuccess('Profile updated successfully.');
         setTimeout(() => setSuccess(false), 3000);
       })
       .catch((error) => {
@@ -156,7 +166,7 @@ const PatientProfile = () => {
       .then(() => {
         setShowPasswordModal(false);
         setPasswordData({ current_password: '', password: '', password_confirmation: '' });
-        setSuccess(true);
+        setSuccess('Password updated. Other devices must sign in again.');
         setTimeout(() => setSuccess(false), 3000);
       })
       .catch((error) => {
@@ -173,7 +183,7 @@ const PatientProfile = () => {
       .then(() => {
         setShowPhotoModal(false);
         setPhotoFile(null);
-        setSuccess(true);
+        setSuccess('Photo updated successfully.');
         setTimeout(() => setSuccess(false), 3000);
       })
       .catch((error) => {
@@ -200,7 +210,7 @@ const PatientProfile = () => {
         if (user?.id) {
           dispatch(fetchPatientAppointments(user.id));
         }
-        setSuccess(true);
+        setSuccess('Profile updated successfully.');
         setTimeout(() => setSuccess(false), 3000);
       })
       .catch((error) => {
@@ -239,16 +249,12 @@ const PatientProfile = () => {
               <Row className="align-items-center">
                 <Col md={2} className="text-center">
                   <div className="position-relative d-inline-block">
-                    <img
-                      src={profile?.user?.photo ? `http://localhost:8000/storage/${profile.user.photo}` : 'https://via.placeholder.com/150'}
-                      alt="Profile"
-                      className="rounded-circle border border-3 border-primary shadow"
-                      style={{ width: '120px', height: '120px', objectFit: 'cover' }}
-                    />
+                    <DoctorAvatar key={profile?.user?.photo || 'initials'} name={`${profile?.user?.prenom || ''} ${profile?.user?.nom || ''}`} photo={profile?.user?.photo} />
                     <Button
                       size="sm"
                       variant="primary"
                       className="position-absolute bottom-0 end-0 rounded-circle border border-white shadow"
+                      aria-label="Update profile photo"
                       onClick={() => setShowPhotoModal(true)}
                       style={{ width: '35px', height: '35px', padding: 0 }}
                     >
@@ -299,12 +305,12 @@ const PatientProfile = () => {
             </Card.Body>
           </Card>
 
-          {userError && <Alert variant="danger" dismissible>{userError}</Alert>}
+          {userError && <Alert variant="danger" dismissible>{userError}{isEditing && <Button variant="outline-danger" disabled={isLoading} onClick={() => { setIsEditing(false); setEmailPassword(''); dispatch(fetchUserProfile()); }}>Reload profile and discard draft</Button>}</Alert>}
           {appointmentError && <Alert variant="danger" dismissible>{appointmentError}</Alert>}
           {success && (
             <Alert variant="success" dismissible onClose={() => setSuccess(false)}>
               <i className="fas fa-check-circle me-2"></i>
-              Operation completed successfully!
+              {success}
             </Alert>
           )}
 
@@ -320,7 +326,7 @@ const PatientProfile = () => {
               <Form onSubmit={handleSave}>
                 <Row>
                   <Col md={6}>
-                    <Form.Group className="mb-3">
+                    <Form.Group className="mb-3" controlId="patient-profile-prenom">
                       <Form.Label>First Name</Form.Label>
                       <Form.Control
                         type="text"
@@ -333,7 +339,7 @@ const PatientProfile = () => {
                     </Form.Group>
                   </Col>
                   <Col md={6}>
-                    <Form.Group className="mb-3">
+                    <Form.Group className="mb-3" controlId="patient-profile-nom">
                       <Form.Label>Last Name</Form.Label>
                       <Form.Control
                         type="text"
@@ -349,7 +355,7 @@ const PatientProfile = () => {
 
                 <Row>
                   <Col md={6}>
-                    <Form.Group className="mb-3">
+                    <Form.Group className="mb-3" controlId="patient-profile-email">
                       <Form.Label>Email</Form.Label>
                       <Form.Control
                         type="email"
@@ -359,10 +365,17 @@ const PatientProfile = () => {
                         disabled={!isEditing || isLoading}
                         required
                       />
+                      {isEditing && formData.email !== profile?.user?.email && (
+                        <Form.Group className="mt-3" controlId="email-change-password">
+                          <Form.Label>Current password to change email</Form.Label>
+                          <Form.Control type="password" autoComplete="current-password" value={emailPassword} onChange={event => setEmailPassword(event.target.value)} required />
+                          <Form.Text>Verify your new address before using your account again. Signed in with a provider? Sign out and use Forgot your password to set one first.</Form.Text>
+                        </Form.Group>
+                      )}
                     </Form.Group>
                   </Col>
                   <Col md={6}>
-                    <Form.Group className="mb-3">
+                    <Form.Group className="mb-3" controlId="patient-profile-telephone">
                       <Form.Label>Phone Number</Form.Label>
                       <Form.Control
                         type="tel"
@@ -377,7 +390,7 @@ const PatientProfile = () => {
 
                 <Row>
                   <Col md={4}>
-                    <Form.Group className="mb-3">
+                    <Form.Group className="mb-3" controlId="patient-profile-sexe">
                       <Form.Label>Gender</Form.Label>
                       <Form.Select
                         name="sexe"
@@ -392,7 +405,7 @@ const PatientProfile = () => {
                     </Form.Group>
                   </Col>
                   <Col md={4}>
-                    <Form.Group className="mb-3">
+                    <Form.Group className="mb-3" controlId="patient-profile-date_de_naissance">
                       <Form.Label>Date of Birth</Form.Label>
                       <Form.Control
                         type="date"
@@ -404,7 +417,7 @@ const PatientProfile = () => {
                     </Form.Group>
                   </Col>
                   <Col md={4}>
-                    <Form.Group className="mb-3">
+                    <Form.Group className="mb-3" controlId="patient-profile-medecin_favori_id">
                       <Form.Label>Favorite Doctor</Form.Label>
                       <Form.Select
                         name="medecin_favori_id"
@@ -427,7 +440,7 @@ const PatientProfile = () => {
                   </Col>
                 </Row>
 
-                <Form.Group className="mb-3">
+                <Form.Group className="mb-3" controlId="patient-profile-adresse">
                   <Form.Label>Address</Form.Label>
                   <Form.Control
                     as="textarea"
@@ -570,7 +583,7 @@ const PatientProfile = () => {
               ) : (
                 <div className="text-center py-4">
                   <i className="fas fa-calendar-alt fa-3x text-muted mb-3"></i>
-                  <p className="text-muted mb-3">You don't have any appointments yet.</p>
+                  <p className="text-muted mb-3">You don&apos;t have any appointments yet.</p>
                   <Button
                     variant="primary"
                     onClick={() => navigate('/patient')}
@@ -591,7 +604,7 @@ const PatientProfile = () => {
         </Modal.Header>
         <Form onSubmit={handlePasswordUpdate}>
           <Modal.Body>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="patient-profile-current_password">
               <Form.Label>Current Password</Form.Label>
               <Form.Control
                 type="password"
@@ -601,7 +614,7 @@ const PatientProfile = () => {
                 required
               />
             </Form.Group>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="patient-profile-password">
               <Form.Label>New Password</Form.Label>
               <Form.Control
                 type="password"
@@ -612,7 +625,7 @@ const PatientProfile = () => {
                 required
               />
             </Form.Group>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="patient-profile-password_confirmation">
               <Form.Label>Confirm New Password</Form.Label>
               <Form.Control
                 type="password"
@@ -649,16 +662,17 @@ const PatientProfile = () => {
         </Modal.Header>
         <Form onSubmit={handlePhotoUpload}>
           <Modal.Body>
-            <Form.Group>
+            {userError && <Alert variant="danger">{userError}</Alert>}
+            <Form.Group controlId="profile-photo-file">
               <Form.Label>Choose a new photo</Form.Label>
               <Form.Control
                 type="file"
-                accept="image/*"
+                accept="image/jpeg,image/png,image/webp"
                 onChange={(e) => setPhotoFile(e.target.files[0])}
                 required
               />
               <Form.Text className="text-muted">
-                Maximum file size: 5MB. Supported formats: JPG, PNG, GIF
+                Maximum file size: 5MB. Supported formats: JPG, PNG, WebP
               </Form.Text>
             </Form.Group>
           </Modal.Body>

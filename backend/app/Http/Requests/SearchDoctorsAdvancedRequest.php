@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 class SearchDoctorsAdvancedRequest extends FormRequest
@@ -17,7 +18,7 @@ class SearchDoctorsAdvancedRequest extends FormRequest
     /**
      * Get the validation rules that apply to the request.
      *
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
@@ -28,7 +29,8 @@ class SearchDoctorsAdvancedRequest extends FormRequest
             'language_ids.*' => ['integer', 'exists:languages,id'],
             'min_rating' => ['nullable', 'numeric', 'min:0', 'max:5'],
             'name' => ['nullable', 'string', 'max:100'],
-            'date' => ['nullable', 'date', 'after_or_equal:today'],
+            'date' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:today'],
+            'page' => ['nullable', 'integer', 'min:1'],
             'sort_by' => ['nullable', 'string', 'in:rating,name,created_at'],
             'sort_order' => ['nullable', 'string', 'in:asc,desc'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],

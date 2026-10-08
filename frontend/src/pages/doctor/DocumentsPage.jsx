@@ -1,147 +1,92 @@
-// src/pages/doctor/DocumentsPage.jsx
-import React, { useState, useEffect, useCallback } from 'react';
-// import { getDoctorDocuments, uploadDoctorDocument, deleteDoctorDocument } from '../../services/doctorService';
-import { FaFileMedical, FaUpload, FaTrash, FaSpinner, FaEye } from 'react-icons/fa';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { deleteDoctorDocument, downloadDoctorDocument, getDoctorDocuments, uploadDoctorDocument } from '../../services/doctorService';
+import { apiError } from '../../utils/apiErrors';
 
-const DoctorDocumentsPage = () => {
+const types = { licence: 'Medical licence', cni: 'Identity document', diplome: 'Diploma', autre: 'Other' };
+const statuses = { pending: 'Awaiting review', approved: 'Approved', rejected: 'Rejected' };
+export default function DocumentsPage() {
     const [documents, setDocuments] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-    const [file, setFile] = useState(null);
-    const [documentType, setDocumentType] = useState('medical_license'); // Example types
-    const [uploading, setUploading] = useState(false);
-
-    const mockDocuments = [
-        { id: 1, document_type: 'Medical License', file_name: 'license_2024.pdf', file_path: '/path/to/license_2024.pdf', uploaded_at: '2024-01-15T10:00:00Z', status: 'approved' },
-        { id: 2, document_type: 'Identity Proof', file_name: 'passport.jpg', file_path: '/path/to/passport.jpg', uploaded_at: '2024-01-20T14:30:00Z', status: 'pending_review' },
-    ];
-
-    const fetchDocuments = useCallback(async () => {
-        setLoading(true);
-        // try {
-        //     const response = await getDoctorDocuments();
-        //     setDocuments(response.data.documents || []);
-        //     setError(null);
-        // } catch (err) {
-        //     setError(err.message || 'Failed to fetch documents.');
-        //     setDocuments([]);
-        // } finally {
-        //     setLoading(false);
-        // }
-        setTimeout(() => { // Mock API
-            setDocuments(mockDocuments);
-            setLoading(false);
-        }, 500);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+    const [message, setMessage] = useState('');
+    const [type, setType] = useState('licence');
+    const [removing, setRemoving] = useState(null);
+    const fileInput = useRef(null);
+    const load = useCallback(async (signal) => {
+        const response = await getDoctorDocuments({ signal }); setDocuments(response.data.documents);
     }, []);
-
     useEffect(() => {
-        fetchDocuments();
-    }, [fetchDocuments]);
-
-    const handleFileChange = (e) => setFile(e.target.files[0]);
-
-    const handleUpload = async (e) => {
-        e.preventDefault();
-        if (!file || !documentType) {
-            alert('Please select a file and document type.');
-            return;
-        }
-        setUploading(true);
-        // const formData = new FormData();
-        // formData.append('document', file);
-        // formData.append('document_type', documentType);
-        // try {
-        //     await uploadDoctorDocument(formData);
-        //     fetchDocuments(); // Refresh list
-        //     setFile(null);
-        //     e.target.reset(); // Reset file input
-        //     alert('Document uploaded successfully! It will be reviewed by an admin.');
-        // } catch (err) {
-        //     setError(err.response?.data?.message || 'Failed to upload document.');
-        // } finally {
-        //     setUploading(false);
-        // }
-        alert(`Mock upload: ${file.name} as ${documentType}`);
-        setDocuments(prev => [...prev, {id: Date.now(), document_type: documentType, file_name: file.name, file_path: '#mock', uploaded_at: new Date().toISOString(), status: 'pending_review'}]);
-        setUploading(false);
-        setFile(null);
-        e.target.reset();
-    };
-
-    const handleDelete = async (docId) => {
-        if (window.confirm('Are you sure you want to delete this document?')) {
-            // try {
-            //     await deleteDoctorDocument(docId);
-            //     fetchDocuments();
-            //     alert('Document deleted.');
-            // } catch (err) {
-            //     setError(err.response?.data?.message || 'Failed to delete document.');
-            // }
-            alert(`Mock delete document ID: ${docId}`);
-            setDocuments(prev => prev.filter(d => d.id !== docId));
-        }
-    };
-
-    if (loading) return <div className="p-6 text-center flex justify-center items-center min-h-[200px]"><FaSpinner className="animate-spin h-8 w-8 text-indigo-600 mr-3" />Loading documents...</div>;
-
-    return (
-        <div className="p-4 md:p-8 min-h-screen bg-gradient-to-br from-indigo-50 via-blue-100 to-white">
-            <h1 className="text-3xl font-bold text-gray-800 mb-8 flex items-center">
-                <FaFileMedical className="mr-3 text-indigo-600"/>My Documents
-            </h1>
-            {error && <p className="text-red-500 bg-red-100 p-3 rounded-md mb-4">{error}</p>}
-
-            <form onSubmit={handleUpload} className="bg-white p-6 rounded-2xl shadow-2xl mb-10 space-y-4 border border-gray-100">
-                <h2 className="text-xl font-semibold text-gray-700 mb-2">Upload New Document</h2>
-                <div>
-                    <label htmlFor="documentType" className="block text-sm font-medium text-gray-700">Document Type</label>
-                    <select id="documentType" value={documentType} onChange={(e) => setDocumentType(e.target.value)} className="mt-1 w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
-                        <option value="medical_license">Medical License</option>
-                        <option value="identity_proof">Identity Proof (e.g., Passport, ID Card)</option>
-                        <option value="degree_certificate">Degree Certificate</option>
-                        <option value="other">Other</option>
-                    </select>
+        const controller = new AbortController();
+        load(controller.signal).catch(err => { if (!controller.signal.aborted) setError(apiError(err, 'Could not load documents.')); })
+            .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+        return () => controller.abort();
+    }, [load]);
+    async function refresh() {
+        setLoading(true); setError('');
+        try { await load(); } catch (err) { setError(apiError(err, 'Could not load documents.')); }
+        finally { setLoading(false); }
+    }
+    async function mutate(action, success) {
+        setBusy(true); setError(''); setMessage('');
+        try {
+            await action(); setMessage(success); setRemoving(null);
+            try { await load(); } catch { setError('Changes saved, but refreshing failed. Reload to see the latest documents.'); }
+            return true;
+        } catch (err) { setError(apiError(err, 'Could not save document changes.')); return false; }
+        finally { setBusy(false); }
+    }
+    async function upload(event) {
+        event.preventDefault(); const file = fileInput.current.files[0];
+        if (!file) return;
+        if (file.size > 10 * 1024 * 1024) { setError('Choose a file smaller than 10 MB.'); return; }
+        const data = new FormData(); data.append('file', file); data.append('type', type);
+        if (await mutate(() => uploadDoctorDocument(data), 'Document uploaded and awaiting review.')) fileInput.current.value = '';
+    }
+    async function download(document) {
+        setBusy(true); setError('');
+        try {
+            const response = await downloadDoctorDocument(document.id);
+            const url = URL.createObjectURL(response.data);
+            const anchor = window.document.createElement('a');
+            anchor.href = url; anchor.download = document.original_name;
+            window.document.body.appendChild(anchor); anchor.click(); anchor.remove();
+            window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (err) {
+            let detail = 'Could not download the document. It may no longer be available.';
+            if (err.response?.data instanceof Blob) {
+                try { detail = JSON.parse(await err.response.data.text()).message || detail; } catch { /* Keep the readable fallback. */ }
+            } else detail = apiError(err, detail);
+            setError(detail);
+        } finally { setBusy(false); }
+    }
+    return <main className="max-w-4xl mx-auto p-6 space-y-6">
+        <h1 className="text-3xl font-bold">Professional documents</h1>
+        <p>Upload your credentials for review. Files are private and accessible to you and authorized administrators.</p>
+        {error && <div role="alert" className="p-4 bg-red-50 text-red-800">{error} <button disabled={busy || loading} onClick={refresh}>Reload documents</button></div>}
+        {message && <p role="status" className="p-4 bg-green-50 text-green-800">{message}</p>}
+        <form onSubmit={upload} className="bg-white border rounded-xl p-6 space-y-4">
+            <h2 className="text-xl font-semibold">Upload a document</h2>
+            <fieldset disabled={busy || loading} className="space-y-4">
+                <div><label htmlFor="document-type">Document type</label><select id="document-type" className="block border rounded p-2 w-full" value={type} onChange={event => setType(event.target.value)}>{Object.entries(types).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
+                <div><label htmlFor="document-file">File</label><input id="document-file" className="block border rounded p-2 w-full" type="file" required ref={fileInput} accept=".pdf,.jpg,.jpeg,.png" aria-describedby="file-help" /><p id="file-help">PDF, JPEG or PNG, up to 10 MB.</p></div>
+                <button className="bg-blue-700 text-white rounded px-4 py-2" type="submit">{busy ? 'Working…' : 'Upload document'}</button>
+            </fieldset>
+        </form>
+        <section className="bg-white border rounded-xl p-6 space-y-4">
+            <h2 className="text-xl font-semibold">Your documents</h2>
+            {loading ? <p role="status">Loading documents…</p> : documents.length === 0 ? <p>No documents uploaded.</p> : documents.map(document => <article key={document.id} className="border-t pt-4 space-y-2">
+                <h3 className="font-semibold break-all">{document.original_name}</h3>
+                <p>{types[document.type] || document.type} · {statuses[document.status] || document.status}</p>
+                {document.rejection_reason && <p className="text-red-800">Review feedback: {document.rejection_reason}</p>}
+                {document.file_available === false && <p className="text-red-800">This file is unavailable. Upload a new copy for review. If this credential is approved, contact support.</p>}
+                <div className="flex flex-wrap gap-4">
+                    <button disabled={busy || document.file_available === false} onClick={() => download(document)}>Download {document.original_name}</button>
+                    {document.status !== 'approved' && (removing === document.id ? <div><span>Delete this document? It will be removed from review and its private file queued for cleanup.</span> <button disabled={busy} onClick={() => mutate(() => deleteDoctorDocument(document.id), 'Document removed. Private file cleanup is queued.')}>Confirm deletion</button> <button disabled={busy} onClick={() => setRemoving(null)}>Keep document</button></div>
+                        : <button disabled={busy} onClick={() => setRemoving(document.id)}>Delete {document.original_name}</button>)}
+                    {document.status === 'approved' && <p>Approved credentials cannot be deleted.</p>}
                 </div>
-                <div>
-                    <label htmlFor="file" className="block text-sm font-medium text-gray-700">Select File (PDF, JPG, PNG)</label>
-                    <input type="file" id="file" onChange={handleFileChange} accept=".pdf,.jpg,.jpeg,.png" required className="mt-1 w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"/>
-                </div>
-                <button type="submit" disabled={uploading} className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md flex items-center justify-center min-w-[120px] transition-all duration-200">
-                    {uploading ? <FaSpinner className="animate-spin h-5 w-5 mr-2"/> : <FaUpload className="h-5 w-5 mr-2"/>}
-                    {uploading ? 'Uploading...' : 'Upload'}
-                </button>
-            </form>
-
-            <div className="bg-white shadow-2xl rounded-2xl p-6 border border-gray-100">
-                <h3 className="text-xl font-semibold text-gray-700 mb-4">Uploaded Documents List</h3>
-                {documents.length > 0 ? (
-                    <ul className="space-y-3">
-                        {documents.map(doc => (
-                            <li key={doc.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 bg-indigo-50 rounded-lg border hover:shadow-lg transition-shadow">
-                                <div className="mb-2 sm:mb-0">
-                                    <p className="font-medium text-gray-800">{doc.document_type}</p>
-                                    <p className="text-sm text-blue-600 hover:text-blue-800 break-all">
-                                        <a href={doc.file_path} target="_blank" rel="noopener noreferrer">{doc.file_name}</a>
-                                    </p>
-                                    <p className="text-xs text-gray-500">Uploaded: {new Date(doc.uploaded_at).toLocaleDateString()}</p>
-                                </div>
-                                <div className="flex items-center space-x-2 mt-2 sm:mt-0">
-                                    <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
-                                        doc.status === 'approved' ? 'bg-green-100 text-green-800' :
-                                        doc.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                                        'bg-yellow-100 text-yellow-800'
-                                    }`}>
-                                        {doc.status.replace('_', ' ')}
-                                    </span>
-                                    <a href={doc.file_path} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700 p-1" title="View Document"><FaEye/></a>
-                                    <button onClick={() => handleDelete(doc.id)} className="text-red-500 hover:text-red-700 p-1" title="Delete Document"><FaTrash/></button>
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
-                ) : <p className="text-gray-600 text-center py-5">No documents uploaded yet.</p>}
-            </div>
-        </div>
-    );
-};
-export default DoctorDocumentsPage;
+            </article>)}
+        </section>
+    </main>;
+}

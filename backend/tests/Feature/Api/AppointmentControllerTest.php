@@ -2,26 +2,29 @@
 
 namespace Tests\Feature\Api;
 
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\TestCase;
-use App\Models\User;
+use App\Models\Admin;
 use App\Models\Doctor;
 use App\Models\Patient;
-use App\Models\Speciality;
 use App\Models\Rendezvous;
-use App\Models\Leave;
-use App\Models\Admin;
-use Laravel\Sanctum\Sanctum;
+use App\Models\Speciality;
+use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Sanctum\Sanctum;
+use Tests\TestCase;
 
 class AppointmentControllerTest extends TestCase
 {
     use RefreshDatabase;
 
     protected User $patientUser;
+
     protected Patient $patient;
+
     protected User $doctorUser;
+
     protected Doctor $doctor;
+
     protected User $adminUser;
 
     protected function setUp(): void
@@ -39,7 +42,7 @@ class AppointmentControllerTest extends TestCase
             'user_id' => $this->doctorUser->id,
             'speciality_id' => $speciality->id,
             'is_verified' => true,
-            'horaires' => ['lundi' => ['09:00-12:00', '14:00-17:00'], 'mardi' => ['09:00-12:00']]
+            'horaires' => ['lundi' => ['09:00-12:00', '14:00-17:00'], 'mardi' => ['09:00-12:00']],
         ]);
 
         // Admin
@@ -55,8 +58,8 @@ class AppointmentControllerTest extends TestCase
         Rendezvous::factory()->create([ //
             'doctor_id' => $this->doctor->id,
             'patient_id' => $this->patient->id,
-            'date_heure' => Carbon::parse($testDate . ' 09:00:00'),
-            'statut' => 'confirmé'
+            'date_heure' => Carbon::parse($testDate.' 09:00:00'),
+            'statut' => 'confirmé',
         ]);
 
         $response = $this->getJson("/api/public/doctors/{$this->doctor->id}/slots?date={$testDate}"); //
@@ -78,7 +81,7 @@ class AppointmentControllerTest extends TestCase
         $response->assertStatus(201)
             ->assertJsonPath('status', 'success') //
             ->assertJsonPath('data.doctor_id', $this->doctor->id) //
-            ->assertJsonPath('data.patient_id', $this->patientUser->id) //
+            ->assertJsonPath('data.patient_id', $this->patient->id) //
             ->assertJsonPath('data.statut', 'en_attente'); //
 
         $this->assertDatabaseHas('rendezvous', [
@@ -97,11 +100,11 @@ class AppointmentControllerTest extends TestCase
             'doctor_id' => $this->doctor->id,
             'patient_id' => $otherPatient->id,
             'date_heure' => $slot,
-            'statut' => 'confirmé'
+            'statut' => 'confirmé',
         ]);
 
         $response = $this->postJson("/api/patient/doctors/{$this->doctor->id}/appointments", [ //
-            'date_heure' => $slot->toDateTimeString()
+            'date_heure' => $slot->toDateTimeString(),
         ]);
         $response->assertStatus(409)
             ->assertJsonPath('message', 'This time slot is no longer available'); //
@@ -114,7 +117,7 @@ class AppointmentControllerTest extends TestCase
             'patient_id' => $this->patient->id,
             'doctor_id' => $this->doctor->id,
             'statut' => 'confirmé',
-            'date_heure' => now()->addDay()
+            'date_heure' => now()->addDay(),
         ]);
 
         $response = $this->patchJson("/api/patient/appointments/{$appointment->id}/status", ['statut' => 'annulé']); //
@@ -130,7 +133,7 @@ class AppointmentControllerTest extends TestCase
         $appointment = Rendezvous::factory()->create([ //
             'doctor_id' => $this->doctor->id,
             'patient_id' => $this->patient->id,
-            'statut' => 'en_attente'
+            'statut' => 'en_attente',
         ]);
 
         $response = $this->patchJson("/api/doctor/appointments/{$appointment->id}/status", ['statut' => 'confirmé']); //
@@ -147,7 +150,7 @@ class AppointmentControllerTest extends TestCase
             'doctor_id' => $this->doctor->id,
             'patient_id' => $this->patient->id,
             'date_heure' => now()->subHour(),
-            'statut' => 'confirmé'
+            'statut' => 'confirmé',
         ]);
 
         $response = $this->postJson("/api/doctor/appointments/{$appointment->id}/no-show", ['reason' => 'Patient did not arrive']); //
@@ -159,11 +162,11 @@ class AppointmentControllerTest extends TestCase
     public function test_admin_can_mark_appointment_as_no_show()
     {
         Sanctum::actingAs($this->adminUser, ['role:admin']);
-         $appointment = Rendezvous::factory()->create([ //
+        $appointment = Rendezvous::factory()->create([ //
             'doctor_id' => $this->doctor->id,
             'patient_id' => $this->patient->id,
             'date_heure' => now()->subHour(),
-            'statut' => 'confirmé'
+            'statut' => 'confirmé',
         ]);
         $response = $this->postJson("/api/admin/appointments/{$appointment->id}/no-show", ['reason' => 'Admin marked no-show']); //
         $response->assertStatus(200)
@@ -206,12 +209,11 @@ class AppointmentControllerTest extends TestCase
         $doctorForFilter = Doctor::factory()->create(); //
         Rendezvous::factory(2)->create(['doctor_id' => $doctorForFilter->id, 'patient_id' => $this->patient->id]); //
 
-
         $responseAll = $this->getJson('/api/appointments'); //
         $responseAll->assertStatus(200)
             ->assertJsonCount(Rendezvous::count(), 'data'); //
 
-        $responseFiltered = $this->getJson('/api/appointments?doctor_id=' . $doctorForFilter->id); //
+        $responseFiltered = $this->getJson('/api/appointments?doctor_id='.$doctorForFilter->id); //
         $responseFiltered->assertStatus(200)
             ->assertJsonCount(2, 'data'); //
     }
@@ -224,19 +226,19 @@ class AppointmentControllerTest extends TestCase
             'doctor_id' => $this->doctor->id,
             'patient_id' => $this->patient->id,
             'statut' => 'terminé',
-            'date_heure' => now()->subDays(5)
+            'date_heure' => now()->subDays(5),
         ]);
         Rendezvous::factory()->count(3)->create([ //
             'doctor_id' => $this->doctor->id,
             'patient_id' => $this->patient->id,
             'statut' => 'no_show',
-            'date_heure' => now()->subDays(3)
+            'date_heure' => now()->subDays(3),
         ]);
         Rendezvous::factory()->count(2)->create([ //
             'doctor_id' => $this->doctor->id,
             'patient_id' => $this->patient->id,
             'statut' => 'annulé',
-            'date_heure' => now()->subDays(2)
+            'date_heure' => now()->subDays(2),
         ]);
         $repeatPatientUser = User::factory()->create(['role' => 'patient']); // Create user for patient
         $repeatPatient = Patient::factory()->create(['user_id' => $repeatPatientUser->id]); // Create patient profile
@@ -244,9 +246,8 @@ class AppointmentControllerTest extends TestCase
             'doctor_id' => $this->doctor->id,
             'patient_id' => $repeatPatient->id,
             'statut' => 'no_show',
-            'date_heure' => now()->subDays(1)
+            'date_heure' => now()->subDays(1),
         ]);
-
 
         $startDate = now()->subMonth()->toDateString();
         $endDate = now()->toDateString();
@@ -265,10 +266,10 @@ class AppointmentControllerTest extends TestCase
                         'no_show_rate',
                     ],
                     'repeat_no_shows' => [
-                        '*' => ['patient_id', 'patient_name', 'no_show_count']
+                        '*' => ['patient_id', 'patient_name', 'no_show_count'],
                     ],
-                    'period'
-                ]
+                    'period',
+                ],
             ])
             ->assertJsonPath('data.summary.total_appointments', 12) //
             ->assertJsonPath('data.summary.no_shows', 5) //
@@ -282,7 +283,7 @@ class AppointmentControllerTest extends TestCase
     public function test_non_doctor_cannot_get_no_show_stats()
     {
         Sanctum::actingAs($this->patientUser, ['role:patient']);
-        $response = $this->getJson("/api/doctor/appointments/no-show-stats"); //
+        $response = $this->getJson('/api/doctor/appointments/no-show-stats'); //
         $response->assertStatus(403);
     }
 }

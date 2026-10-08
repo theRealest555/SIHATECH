@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Doctor;
 
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 class CompleteProfileRequest extends FormRequest
@@ -17,11 +18,12 @@ class CompleteProfileRequest extends FormRequest
     /**
      * Get the validation rules that apply to the request.
      *
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
         return [
+            'expected_profile_revision' => ['required', 'string', 'regex:/^[a-f0-9]{64}$/'],
             'speciality_id' => ['required', 'exists:specialities,id'],
             'telephone' => ['nullable', 'string', 'max:20'],
             'adresse' => ['nullable', 'string', 'max:255'],

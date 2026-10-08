@@ -3,12 +3,15 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
-use App\Models\User;
+use App\Http\Requests\Auth\LoginRequest;
 use App\Models\Admin;
+use App\Models\User;
+use App\Services\AccountCredentials;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 
 class AdminAuthController extends Controller
@@ -16,7 +19,7 @@ class AdminAuthController extends Controller
     /**
      * Handle an admin login request.
      */
-    public function login(Request $request): JsonResponse
+    public function login(LoginRequest $request): JsonResponse
     {
         try {
             $request->validate([
@@ -25,24 +28,34 @@ class AdminAuthController extends Controller
             ]);
 
             $user = User::where('email', $request->email)
-                       ->where('role', 'admin')
-                       ->first();
+                ->where('role', 'admin')
+                ->first();
 
-            if (! $user || ! Hash::check($request->password, $user->password)) {
+            $request->ensureIsNotRateLimited();
+            if (! $user || ! Hash::check($request->password, $user->password) || ! $user->isApprovedAdmin()) {
+                RateLimiter::hit($request->throttleKey());
                 throw ValidationException::withMessages([
                     'email' => ['Les informations d\'identification fournies sont incorrectes.'],
                 ]);
             }
 
-            // Create token for the found user
-            $token = $user->createToken('admin-token', ['admin'])->plainTextToken;
+            RateLimiter::clear($request->throttleKey());
+            Auth::guard('web')->login($user, $request->boolean('remember'));
+            if ($request->hasSession()) {
+                $request->session()->regenerate();
+            }
+            $token = null;
+            if (! $request->hasSession()) {
+                [$user, $token] = app(AccountCredentials::class)->issueToken($user->id, $request->input('password'), 'admin-token');
+            }
 
             return response()->json([
                 'user' => $user,
                 'token' => $token,
             ], 200);
-        }
-        catch (ValidationException $e) {
+        } catch (ValidationException $e) {
+            Auth::guard('web')->logoutCurrentDevice();
+
             return response()->json([
                 'message' => 'Invalid credentials',
                 'errors' => $e->errors(),
@@ -50,7 +63,6 @@ class AdminAuthController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Login failed',
-                'error' => $e->getMessage()
             ], 500);
         }
     }
@@ -60,10 +72,6 @@ class AdminAuthController extends Controller
      */
     public function logout(Request $request): JsonResponse
     {
-        if ($request->user()) {
-            $request->user()->currentAccessToken()->delete();
-        }
-
-        return response()->json(['message' => 'Logged out successfully']);
+        return app(AuthenticatedSessionController::class)->destroy($request);
     }
 }

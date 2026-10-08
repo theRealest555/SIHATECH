@@ -2,14 +2,16 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
-
 
 class Document extends Model
 {
     use HasFactory;
+
+    protected $hidden = ['file_path'];
+
     protected $fillable = [
         'doctor_id',
         'type',
@@ -18,7 +20,7 @@ class Document extends Model
         'status',
         'rejection_reason',
         'admin_id',
-        'verified_at'
+        'verified_at',
     ];
 
     protected $casts = [

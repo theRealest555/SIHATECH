@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'required_document_types' => ['licence'],
     /*
     |--------------------------------------------------------------------------
     | Email Verification Settings
@@ -16,8 +17,8 @@ return [
 
     // Frontend URLs for redirection after verification
     'redirect' => [
-        'success' => env('FRONTEND_URL', 'http://localhost:3000') . '/dashboard?verified=1',
-        'already_verified' => env('FRONTEND_URL', 'http://localhost:3000') . '/dashboard?verified=1',
-        'error' => env('FRONTEND_URL', 'http://localhost:3000') . '/email/verify/error',
+        'success' => env('FRONTEND_URL', 'http://localhost:3000').'/verify-email',
+        'already_verified' => env('FRONTEND_URL', 'http://localhost:3000').'/dashboard?verified=1',
+        'error' => env('FRONTEND_URL', 'http://localhost:3000').'/verify-email?error=invalid-link',
     ],
 ];

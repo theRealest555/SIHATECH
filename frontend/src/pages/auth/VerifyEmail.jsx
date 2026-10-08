@@ -1,217 +1,47 @@
-import { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Container, Row, Col, Card, Button, Alert, Spinner } from 'react-bootstrap';
-import axios from 'axios';
-import ApiService from '../../services/api';
+import { useState } from 'react';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
+import { useAuth } from '../../hooks/useAuth';
+import { resendVerificationEmail } from '../../services/authService';
 
-const VerifyEmail = () => {
-  const navigate = useNavigate();
+export default function VerifyEmail() {
+  const { user, fetchUser } = useAuth();
   const [searchParams] = useSearchParams();
-  const [status, setStatus] = useState('pending');
-  const [error, setError] = useState(null);
-  const [message, setMessage] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [verificationLoading, setVerificationLoading] = useState(false);
-
-  // Check if we're coming back from email verification link
-  useEffect(() => {
-    const verified = searchParams.get('verified');
-    if (verified === '1') {
-      setStatus('verified');
-      setMessage('Your email has been verified successfully!');
-      
-      // Check if doctor needs to complete profile
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
-      if (user.role === 'medecin') {
-        checkDoctorProfileCompletion();
-      } else {
-        setTimeout(() => navigate('/dashboard'), 2000);
-      }
-    }
-  }, [searchParams, navigate]);
-
-  // Check verification status on mount
-  useEffect(() => {
-    checkVerificationStatus();
-  }, []);
-
-  const checkVerificationStatus = async () => {
+  const [message, setMessage] = useState(() => searchParams.get('error') === 'invalid-link'
+    ? 'This verification link is invalid or expired. Request a new email and open its link while signed in.'
+    : 'Check your inbox and open the verification link while signed in.');
+  const [busy, setBusy] = useState(false);
+  if (!user) return <div className="p-8">Please <Link to="/login">sign in</Link> to verify your email.</div>;
+  if (user.email_verified_at) return <Navigate to="/dashboard" replace />;
+  const check = async resend => {
+    if (busy) return;
+    setBusy(true);
     try {
-      setVerificationLoading(true);
-      const token = localStorage.getItem('token');
-      if (!token) {
-        navigate('/login');
-        return;
-      }
-
-      const response = await axios.get('http://localhost:8000/api/email/verify/check', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.data.verified) {
-        setStatus('verified');
-        setMessage('Your email is already verified!');
-        
-        // Check if doctor needs to complete profile
-        const user = JSON.parse(localStorage.getItem('user') || '{}');
-        if (user.role === 'medecin') {
-          checkDoctorProfileCompletion();
+      if (resend) {
+        const response = await resendVerificationEmail();
+        if (response?.data?.status === 'already-verified') {
+          await fetchUser();
+          setMessage('Your email is already verified. Continue to your dashboard.');
+        } else if (response?.data?.status === 'verification-link-sent') {
+          setMessage('Verification email sent. Check your inbox and spam folder.');
         } else {
-          setTimeout(() => navigate('/dashboard'), 2000);
+          setMessage('Unable to confirm delivery. Check verification or try again later.');
         }
       }
-    } catch (err) {
-      console.error('Error checking verification status:', err);
-      setError('Failed to check verification status');
-    } finally {
-      setVerificationLoading(false);
+      else { const current = await fetchUser(); if (!current?.email_verified_at) setMessage('Your email is not verified yet. Open the email link first.'); }
+    } catch (error) {
+      setMessage(error.response?.status === 429 ? 'Too many verification requests. Wait a minute before trying again.'
+        : error.response?.status === 503 ? 'Unable to send verification email. Please try again later.'
+          : 'Unable to complete the request. Please retry.');
     }
+    finally { setBusy(false); }
   };
-
-  const checkDoctorProfileCompletion = async () => {
-    try {
-      const response = await ApiService.getProfile();
-      const doctor = response.data.doctor;
-      
-      if (!doctor || !doctor.speciality_id) {
-        setMessage('Your email is verified! Please complete your profile to continue.');
-        setTimeout(() => navigate('/doctor/complete-profile'), 3000);
-      } else {
-        setTimeout(() => navigate('/dashboard'), 2000);
-      }
-    } catch (err) {
-      console.error('Error checking doctor profile:', err);
-      setTimeout(() => navigate('/dashboard'), 2000);
-    }
-  };
-
-  const resendVerification = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      const token = localStorage.getItem('token');
-      if (!token) {
-        navigate('/login');
-        return;
-      }
-
-      await axios.post('http://localhost:8000/api/email/verification-notification', {}, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      setStatus('sent');
-      setMessage('Verification email has been resent! Please check your inbox.');
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to resend verification email');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    navigate('/login');
-  };
-
-  if (verificationLoading) {
-    return (
-      <Container className="mt-5">
-        <div className="text-center">
-          <Spinner animation="border" variant="primary" />
-          <p className="mt-3">Checking verification status...</p>
-        </div>
-      </Container>
-    );
-  }
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 via-blue-100 to-white">
-      <Container>
-        <Row className="justify-content-center">
-          <Col md={6} lg={5}>
-            <Card className="auth-card shadow-2xl rounded-3xl border-0">
-              <Card.Body className="p-5 text-center">
-                {status === 'verified' ? (
-                  <>
-                    <i className="fas fa-check-circle fa-5x text-success mb-4"></i>
-                    <h2 className="mb-3 font-bold">Email Verified!</h2>
-                    <p className="text-muted mb-4">{message}</p>
-                    <Spinner animation="border" size="sm" className="me-2" />
-                    <span>Redirecting...</span>
-                  </>
-                ) : (
-                  <>
-                    <i className="fas fa-envelope fa-5x text-primary mb-4"></i>
-                    <h2 className="mb-3 font-bold">Verify Your Email</h2>
-                    
-                    {error && (
-                      <Alert variant="danger" className="mb-4">
-                        <i className="fas fa-exclamation-triangle me-2"></i>
-                        {error}
-                      </Alert>
-                    )}
-                    
-                    {status === 'sent' && (
-                      <Alert variant="success" className="mb-4">
-                        <i className="fas fa-check me-2"></i>
-                        {message}
-                      </Alert>
-                    )}
-                    
-                    <p className="text-muted mb-4">
-                      We've sent a verification link to your email address. 
-                      Please check your inbox and click the link to verify your account.
-                    </p>
-                    
-                    <div className="bg-light p-3 rounded mb-4">
-                      <p className="mb-0">
-                        <small>
-                          <strong>Didn't receive the email?</strong><br />
-                          Check your spam folder or click the button below to resend.
-                        </small>
-                      </p>
-                    </div>
-                    
-                    <div className="d-grid gap-2">
-                      <Button
-                        variant="primary"
-                        onClick={resendVerification}
-                        disabled={loading || status === 'sent'}
-                        className="py-2 text-lg rounded-lg shadow"
-                      >
-                        {loading ? (
-                          <>
-                            <Spinner animation="border" size="sm" className="me-2" />
-                            Sending...
-                          </>
-                        ) : (
-                          <>
-                            <i className="fas fa-paper-plane me-2"></i>
-                            Resend Verification Email
-                          </>
-                        )}
-                      </Button>
-                      
-                      <Button
-                        variant="outline-secondary"
-                        onClick={handleLogout}
-                        className="py-2 text-lg rounded-lg shadow"
-                      >
-                        <i className="fas fa-sign-out-alt me-2"></i>
-                        Logout
-                      </Button>
-                    </div>
-                  </>
-                )}
-              </Card.Body>
-            </Card>
-          </Col>
-        </Row>
-      </Container>
+  return <section className="max-w-lg mx-auto p-8 bg-white rounded-xl shadow">
+    <h1 className="text-2xl font-semibold mb-4">Verify your email</h1>
+    <p className="mb-3">Verification address: <strong>{user.email}</strong></p>
+    <p role="status" className="mb-4">{message}</p>
+    <div className="flex flex-wrap gap-2">
+      <button disabled={busy} onClick={() => check(false)} className="rounded-md bg-indigo-600 text-white px-4 py-2 hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50">Check verification</button>
+      <button disabled={busy} onClick={() => check(true)} className="rounded-md border border-indigo-600 bg-white text-indigo-700 px-4 py-2 hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50">Resend email</button>
     </div>
-  );
-};
-
-export default VerifyEmail;
+  </section>;
+}

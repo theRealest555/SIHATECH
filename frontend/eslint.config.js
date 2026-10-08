@@ -5,7 +5,8 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default [
-  { ignores: ['dist'] },
+  { ignores: ['dist', 'test-results', 'playwright-report'] },
+  { files: ['e2e/**/*.mjs', 'playwright.config.mjs'], languageOptions: { globals: globals.node }, rules: js.configs.recommended.rules },
   {
     files: ['**/*.{js,jsx}'],
     languageOptions: {
@@ -17,7 +18,7 @@ export default [
         sourceType: 'module',
       },
     },
-    settings: { react: { version: '18.3' } },
+    settings: { react: { version: 'detect' } },
     plugins: {
       react,
       'react-hooks': reactHooks,
