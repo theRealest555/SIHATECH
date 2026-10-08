@@ -1,12 +1,13 @@
 <?php
+
 // app/Http/Middleware/RoleMiddleware.php
 
 namespace App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
-use Symfony\Component\HttpFoundation\Response;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpFoundation\Response;
 
 class RoleMiddleware
 {
@@ -21,16 +22,20 @@ class RoleMiddleware
             'user_status' => $user ? $user->status : 'no status',
         ]);
 
-        if (!$user) {
+        if (! $user) {
             return response()->json([
-                'message' => 'Authentication required.'
+                'message' => 'Authentication required.',
             ], 401);
         }
 
         if ($user->role !== $role) {
             return response()->json([
-                'message' => "Access denied. Required role: {$role}, your role: {$user->role}"
+                'message' => "Access denied. Required role: {$role}, your role: {$user->role}",
             ], 403);
+        }
+
+        if ($role === 'admin' && ! $user->isApprovedAdmin()) {
+            return response()->json(['message' => 'Administrator access is disabled.'], 403);
         }
 
         return $next($request);

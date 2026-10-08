@@ -2,8 +2,8 @@
 
 namespace Database\Factories;
 
-use App\Models\Document;
 use App\Models\Doctor;
+use App\Models\Document;
 use App\Models\User; // For admin_id
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
@@ -14,18 +14,14 @@ class DocumentFactory extends Factory
 
     public function definition(): array
     {
-        // Ensure a doctor user exists to associate with the document's doctor
-        $doctorUser = User::factory()->create(['role' => 'medecin']);
-        $doctor = Doctor::factory()->create(['user_id' => $doctorUser->id]); // Ensures a doctor exists
-
         // Ensure an admin user exists for moderation fields if status is not pending
         $adminUser = User::factory()->admin()->create();
 
         return [
-            'doctor_id' => $doctor->id,
+            'doctor_id' => Doctor::factory(),
             'type' => $this->faker->randomElement(['licence', 'cni', 'diplome', 'autre']),
-            'file_path' => 'documents/' . Str::random(10) . '.pdf',
-            'original_name' => $this->faker->word . '.pdf',
+            'file_path' => 'documents/'.Str::random(10).'.pdf',
+            'original_name' => $this->faker->word.'.pdf',
             'status' => $this->faker->randomElement(['pending', 'approved', 'rejected']),
             'rejection_reason' => function (array $attributes) {
                 return $attributes['status'] === 'rejected' ? $this->faker->sentence : null;
@@ -55,6 +51,7 @@ class DocumentFactory extends Factory
     {
         return $this->state(function (array $attributes) {
             $adminUser = User::where('role', 'admin')->first() ?? User::factory()->admin()->create();
+
             return [
                 'status' => 'approved',
                 'admin_id' => $adminUser->id,
@@ -68,6 +65,7 @@ class DocumentFactory extends Factory
     {
         return $this->state(function (array $attributes) {
             $adminUser = User::where('role', 'admin')->first() ?? User::factory()->admin()->create();
+
             return [
                 'status' => 'rejected',
                 'admin_id' => $adminUser->id,

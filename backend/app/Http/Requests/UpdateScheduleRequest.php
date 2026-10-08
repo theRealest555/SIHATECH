@@ -2,6 +2,8 @@
 
 namespace App\Http\Requests;
 
+use App\Rules\WeeklySchedule;
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UpdateScheduleRequest extends FormRequest
@@ -17,14 +19,15 @@ class UpdateScheduleRequest extends FormRequest
     /**
      * Get the validation rules that apply to the request.
      *
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
         return [
-            'schedule' => ['required', 'array'],
+            'expected_schedule_revision' => ['required', 'string', 'regex:/^[a-f0-9]{64}$/'],
+            'schedule' => ['present', 'array', new WeeklySchedule],
             'schedule.*' => ['array'],
-            'schedule.*.*' => ['string', 'regex:/^([01]?[0-9]|2[0-3]):[0-5][0-9]-([01]?[0-9]|2[0-3]):[0-5][0-9]$/'],
+            'schedule.*.*' => ['string', 'regex:/^([01][0-9]|2[0-3]):[0-5][0-9]-([01][0-9]|2[0-3]):[0-5][0-9]$/'],
         ];
     }
 
@@ -39,7 +42,7 @@ class UpdateScheduleRequest extends FormRequest
             'schedule.required' => 'L\'horaire est obligatoire.',
             'schedule.array' => 'L\'horaire doit être un tableau.',
             'schedule.*.array' => 'Chaque jour de l\'horaire doit être un tableau.',
-            'schedule.*.*.regex' => 'Le format des horaires doit être HH:mm-HH:mm (ex. 09:00-17:00).'
+            'schedule.*.*.regex' => 'Le format des horaires doit être HH:mm-HH:mm (ex. 09:00-17:00).',
         ];
     }
 }

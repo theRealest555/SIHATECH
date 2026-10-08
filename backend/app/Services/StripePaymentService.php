@@ -2,19 +2,24 @@
 
 namespace App\Services;
 
+use App\Models\Abonnement;
 use App\Models\Payment;
+use App\Models\User;
 use App\Models\UserSubscription;
-use Illuminate\Support\Str;
+use Carbon\Carbon;
+use Exception;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Stripe\Stripe;
-use Stripe\PaymentIntent;
+use Illuminate\Support\Str;
 use Stripe\Customer;
+use Stripe\Exception\SignatureVerificationException;
+use Stripe\PaymentIntent; // Added this
+use Stripe\PaymentMethod; // Added this
+use Stripe\Price;
+use Stripe\SetupIntent;
+use Stripe\Stripe;
 use Stripe\Subscription;
 use Stripe\Webhook;
-use Stripe\Exception\SignatureVerificationException;
-use Stripe\SetupIntent; // Added this
-use Stripe\PaymentMethod; // Added this
-use Exception;
 
 class StripePaymentService
 {
@@ -37,9 +42,9 @@ class StripePaymentService
                 'metadata' => [
                     'user_id' => $userData['user_id'] ?? null,
                 ],
-            ]);
+            ], ['idempotency_key' => 'customer_'.$userData['user_id']]);
         } catch (Exception $e) {
-            Log::error('Stripe customer creation failed: ' . $e->getMessage());
+            Log::error('Stripe customer creation failed: '.$e->getMessage());
             throw $e;
         }
     }
@@ -55,7 +60,7 @@ class StripePaymentService
                 'payment_method_types' => ['card'],
             ]);
         } catch (Exception $e) {
-            Log::error('Stripe SetupIntent creation failed: ' . $e->getMessage());
+            Log::error('Stripe SetupIntent creation failed: '.$e->getMessage());
             throw $e;
         }
     }
@@ -88,14 +93,14 @@ class StripePaymentService
 
             return ['success' => true];
         } catch (Exception $e) {
-            Log::error('Stripe payment method update failed: ' . $e->getMessage(), [
+            Log::error('Stripe payment method update failed: '.$e->getMessage(), [
                 'user_id' => $user->id,
-                'stripe_subscription_id' => $stripeSubscriptionId
+                'stripe_subscription_id' => $stripeSubscriptionId,
             ]);
+
             return ['success' => false, 'error' => $e->getMessage()];
         }
     }
-
 
     /**
      * Create a payment intent for one-time payment
@@ -119,7 +124,8 @@ class StripePaymentService
                 'payment_intent_id' => $paymentIntent->id,
             ];
         } catch (Exception $e) {
-            Log::error('Stripe payment intent creation failed: ' . $e->getMessage());
+            Log::error('Stripe payment intent creation failed: '.$e->getMessage());
+
             return [
                 'success' => false,
                 'error' => $e->getMessage(),
@@ -130,34 +136,51 @@ class StripePaymentService
     /**
      * Create a subscription
      */
+    public function assertPlanPrice(Abonnement $plan): void
+    {
+        $price = Price::retrieve($plan->stripe_price_id);
+        $interval = $plan->billing_cycle === 'yearly' ? 'year' : 'month';
+        $count = $plan->billing_cycle === 'semi-annual' ? 6 : 1;
+        if (! $price->active || $price->currency !== 'mad' || $price->unit_amount !== (int) round((float) $plan->price * 100)
+            || $price->recurring?->interval !== $interval || $price->recurring?->interval_count !== $count
+            || ($price->recurring?->usage_type ?? 'licensed') !== 'licensed') {
+            throw new \RuntimeException('Provider price does not match the published plan.');
+        }
+    }
+
     public function createSubscription(array $data): array
     {
         try {
             // Create or retrieve customer
             $customer = $this->getOrCreateCustomer($data['user']);
 
+            $plan = Abonnement::findOrFail($data['subscription_plan_id']);
+            $this->assertPlanPrice($plan);
             // Create subscription
             $subscription = Subscription::create([
                 'customer' => $customer->id,
                 'items' => [
-                    ['price' => $data['price_id']],
+                    ['price' => $plan->stripe_price_id],
                 ],
                 'payment_behavior' => 'default_incomplete',
+                'default_payment_method' => $data['payment_method_id'],
                 'payment_settings' => ['save_default_payment_method' => 'on_subscription'],
-                'expand' => ['latest_invoice.payment_intent'],
+                'expand' => ['latest_invoice.confirmation_secret'],
                 'metadata' => [
                     'user_id' => $data['user_id'],
                     'subscription_plan_id' => $data['subscription_plan_id'],
+                    'local_subscription_id' => $data['subscription_id'],
                 ],
-            ]);
+            ], ['idempotency_key' => 'subscription_'.$data['subscription_id']]);
 
             return [
                 'success' => true,
                 'subscription' => $subscription,
-                'client_secret' => $subscription->latest_invoice->payment_intent->client_secret,
+                'client_secret' => $subscription->latest_invoice->confirmation_secret->client_secret ?? null,
             ];
         } catch (Exception $e) {
-            Log::error('Stripe subscription creation failed: ' . $e->getMessage());
+            Log::error('Stripe subscription creation failed: '.$e->getMessage());
+
             return [
                 'success' => false,
                 'error' => $e->getMessage(),
@@ -179,7 +202,8 @@ class StripePaymentService
                 'subscription' => $subscription,
             ];
         } catch (Exception $e) {
-            Log::error('Stripe subscription cancellation failed: ' . $e->getMessage());
+            Log::error('Stripe subscription cancellation failed: '.$e->getMessage());
+
             return [
                 'success' => false,
                 'error' => $e->getMessage(),
@@ -207,7 +231,7 @@ class StripePaymentService
                 'payment_data' => [
                     'stripe_payment_intent_id' => $data['payment_intent_id'] ?? null,
                     'stripe_subscription_id' => $data['stripe_subscription_id'] ?? null,
-                ]
+                ],
             ]);
 
             // For subscription payments, handle differently
@@ -217,13 +241,15 @@ class StripePaymentService
                     'user_id' => $data['user_id'],
                     'price_id' => $data['price_id'],
                     'subscription_plan_id' => $data['subscription_plan_id'],
+                    'subscription_id' => $data['subscription_id'],
+                    'payment_method_id' => $data['payment_method_id'],
                 ]);
 
                 if ($subscriptionResult['success']) {
                     $payment->update([
                         'payment_data' => array_merge($payment->payment_data, [
                             'stripe_subscription_id' => $subscriptionResult['subscription']->id,
-                        ])
+                        ]),
                     ]);
 
                     return [
@@ -234,6 +260,7 @@ class StripePaymentService
                     ];
                 } else {
                     $payment->update(['status' => 'failed']);
+
                     return $subscriptionResult;
                 }
             } else {
@@ -244,7 +271,7 @@ class StripePaymentService
                     $payment->update([
                         'payment_data' => array_merge($payment->payment_data, [
                             'stripe_payment_intent_id' => $paymentIntentResult['payment_intent_id'],
-                        ])
+                        ]),
                     ]);
 
                     return [
@@ -254,6 +281,7 @@ class StripePaymentService
                     ];
                 } else {
                     $payment->update(['status' => 'failed']);
+
                     return $paymentIntentResult;
                 }
             }
@@ -264,13 +292,13 @@ class StripePaymentService
 
             Log::error('Payment processing failed', [
                 'error' => $e->getMessage(),
-                'data' => $data
+                'user_id' => $data['user_id'] ?? null,
             ]);
 
             return [
                 'success' => false,
                 'error' => $e->getMessage(),
-                'payment' => $payment ?? null
+                'payment' => $payment ?? null,
             ];
         }
     }
@@ -287,47 +315,58 @@ class StripePaymentService
                 config('services.stripe.webhook_secret')
             );
 
-            // Handle the event
-            switch ($event->type) {
-                case 'payment_intent.succeeded':
-                    $this->handlePaymentIntentSucceeded($event->data->object);
-                    break;
+            return DB::transaction(function () use ($event) {
+                $events = DB::table('stripe_events');
+                $events->insertOrIgnore(['id' => $event->id, 'type' => $event->type, 'created' => $event->created]);
+                $stored = $events->where('id', $event->id)->lockForUpdate()->first();
+                if ($stored->processed_at !== null) {
+                    return ['success' => true];
+                }
+                switch ($event->type) {
+                    case 'payment_intent.succeeded':
+                        $this->handlePaymentIntentSucceeded($event->data->object);
+                        break;
 
-                case 'payment_intent.payment_failed':
-                    $this->handlePaymentIntentFailed($event->data->object);
-                    break;
+                    case 'payment_intent.payment_failed':
+                        $this->handlePaymentIntentFailed($event->data->object);
+                        break;
 
-                case 'customer.subscription.created':
-                    $this->handleSubscriptionCreated($event->data->object);
-                    break;
+                    case 'customer.subscription.created':
+                        $this->handleSubscriptionCreated($event->data->object);
+                        break;
 
-                case 'customer.subscription.updated':
-                    $this->handleSubscriptionUpdated($event->data->object);
-                    break;
+                    case 'customer.subscription.updated':
+                        $this->handleSubscriptionUpdated($event->data->object);
+                        break;
 
-                case 'customer.subscription.deleted':
-                    $this->handleSubscriptionDeleted($event->data->object);
-                    break;
+                    case 'customer.subscription.deleted':
+                        $this->handleSubscriptionDeleted($event->data->object);
+                        break;
 
-                case 'invoice.payment_succeeded':
-                    $this->handleInvoicePaymentSucceeded($event->data->object);
-                    break;
+                    case 'invoice.payment_succeeded':
+                        $this->handleInvoicePaymentSucceeded($event->data->object);
+                        break;
 
-                case 'invoice.payment_failed':
-                    $this->handleInvoicePaymentFailed($event->data->object);
-                    break;
+                    case 'invoice.payment_failed':
+                        $this->handleInvoicePaymentFailed($event->data->object);
+                        break;
 
-                default:
-                    Log::info('Unhandled webhook event type: ' . $event->type);
-            }
+                    default:
+                        Log::info('Unhandled webhook event type: '.$event->type);
+                }
 
-            return ['success' => true, 'message' => 'Webhook handled successfully'];
+                DB::table('stripe_events')->where('id', $event->id)->update(['processed_at' => now()]);
+
+                return ['success' => true, 'message' => 'Webhook handled successfully'];
+            }, 3);
         } catch (SignatureVerificationException $e) {
-            Log::error('Stripe webhook signature verification failed: ' . $e->getMessage());
-            return ['success' => false, 'error' => 'Invalid signature'];
+            Log::error('Stripe webhook signature verification failed: '.$e->getMessage());
+
+            return ['success' => false, 'error' => 'Invalid signature', 'status' => 400];
         } catch (Exception $e) {
-            Log::error('Stripe webhook handling failed: ' . $e->getMessage());
-            return ['success' => false, 'error' => $e->getMessage()];
+            Log::error('Stripe webhook handling failed: '.$e->getMessage());
+
+            return ['success' => false, 'error' => 'Webhook processing failed', 'status' => 500];
         }
     }
 
@@ -336,26 +375,21 @@ class StripePaymentService
      */
     public function getOrCreateCustomer($user): Customer
     {
-        // Check if user already has a Stripe customer ID
-        if ($user->stripe_customer_id) {
-            try {
-                return Customer::retrieve($user->stripe_customer_id);
-            } catch (Exception $e) {
-                Log::warning('Failed to retrieve Stripe customer: ' . $e->getMessage());
+        return DB::transaction(function () use ($user) {
+            $lockedUser = User::whereKey($user->id)->lockForUpdate()->firstOrFail();
+            if ($lockedUser->stripe_customer_id) {
+                // Network/provider failures must not silently create a second customer.
+                return Customer::retrieve($lockedUser->stripe_customer_id);
             }
-        }
+            $customer = $this->createCustomer([
+                'email' => $lockedUser->email,
+                'name' => $lockedUser->prenom.' '.$lockedUser->nom,
+                'user_id' => $lockedUser->id,
+            ]);
+            $lockedUser->forceFill(['stripe_customer_id' => $customer->id])->save();
 
-        // Create new customer
-        $customer = $this->createCustomer([
-            'email' => $user->email,
-            'name' => $user->prenom . ' ' . $user->nom,
-            'user_id' => $user->id,
-        ]);
-
-        // Save customer ID to user
-        $user->update(['stripe_customer_id' => $customer->id]);
-
-        return $customer;
+            return $customer;
+        });
     }
 
     /**
@@ -370,12 +404,12 @@ class StripePaymentService
                 'status' => 'completed',
                 'payment_data' => array_merge($payment->payment_data, [
                     'stripe_charge_id' => $paymentIntent->charges->data[0]->id ?? null,
-                ])
+                ]),
             ]);
 
             // If this is a subscription payment, activate the subscription
             if ($payment->user_subscription_id) {
-                $subscription = UserSubscription::find($payment->user_subscription_id);
+                $subscription = UserSubscription::whereKey($payment->user_subscription_id)->lockForUpdate()->first();
                 if ($subscription && $subscription->status === 'pending') {
                     $subscription->update(['status' => 'active']);
                 }
@@ -390,12 +424,12 @@ class StripePaymentService
     {
         $payment = Payment::where('payment_data->stripe_payment_intent_id', $paymentIntent->id)->first();
 
-        if ($payment) {
+        if ($payment && $payment->status !== 'completed') {
             $payment->update([
                 'status' => 'failed',
                 'payment_data' => array_merge($payment->payment_data, [
                     'failure_reason' => $paymentIntent->last_payment_error->message ?? 'Unknown error',
-                ])
+                ]),
             ]);
         }
     }
@@ -405,7 +439,7 @@ class StripePaymentService
      */
     protected function handleSubscriptionCreated($subscription): void
     {
-        Log::info('Subscription created: ' . $subscription->id, [
+        Log::info('Subscription created: '.$subscription->id, [
             'customer' => $subscription->customer,
             'metadata' => $subscription->metadata,
         ]);
@@ -420,6 +454,12 @@ class StripePaymentService
 
         if ($userSubscription) {
             $status = $this->mapStripeStatus($subscription->status);
+            if ($status === 'active') {
+                return; // Only paid invoice/payment events grant access.
+            }
+            if ($userSubscription->status === 'cancelled' && $status !== 'cancelled') {
+                return;
+            }
             $userSubscription->update(['status' => $status]);
         }
     }
@@ -444,30 +484,31 @@ class StripePaymentService
      */
     protected function handleInvoicePaymentSucceeded($invoice): void
     {
-        // Create payment record for subscription renewal
-        if ($invoice->subscription && $invoice->billing_reason === 'subscription_cycle') {
-            $userSubscription = UserSubscription::where('payment_method->stripe_subscription_id', $invoice->subscription)->first();
-
-            if ($userSubscription) {
-                Payment::create([
-                    'user_id' => $userSubscription->user_id,
-                    'user_subscription_id' => $userSubscription->id,
-                    'transaction_id' => 'stripe_' . $invoice->id,
-                    'amount' => $invoice->amount_paid / 100, // Convert from cents
-                    'currency' => strtoupper($invoice->currency),
-                    'status' => 'completed',
-                    'payment_method' => 'stripe',
-                    'payment_data' => [
-                        'stripe_invoice_id' => $invoice->id,
-                        'stripe_charge_id' => $invoice->charge,
-                    ]
-                ]);
-
-                // Extend subscription end date
-                $userSubscription->update([
-                    'ends_at' => now()->addMonth(), // Adjust based on billing cycle
-                ]);
-            }
+        $stripeId = $invoice->subscription ?? $invoice->parent?->subscription_details?->subscription;
+        if (! $stripeId) {
+            return;
+        }
+        $subscription = UserSubscription::where('payment_method->stripe_subscription_id', $stripeId)->lockForUpdate()->first();
+        if (! $subscription) {
+            throw new \RuntimeException('Subscription mapping is not available yet.');
+        }
+        // The event is already signature-verified; a paid invoice establishes entitlement.
+        $payment = Payment::where('user_subscription_id', $subscription->id)->where('status', 'pending')->first();
+        $attributes = [
+            'user_id' => $subscription->user_id, 'user_subscription_id' => $subscription->id,
+            'transaction_id' => 'stripe_'.$invoice->id, 'amount' => $invoice->amount_paid / 100,
+            'currency' => strtoupper($invoice->currency), 'status' => 'completed', 'payment_method' => 'stripe',
+            'payment_data' => ['stripe_invoice_id' => $invoice->id, 'stripe_subscription_id' => $stripeId],
+        ];
+        if ($payment) {
+            $payment->update($attributes);
+        } else {
+            Payment::firstOrCreate(['transaction_id' => $attributes['transaction_id']], $attributes);
+        }
+        $periodEnd = $invoice->lines->data[0]->period->end ?? null;
+        if ($periodEnd && $subscription->status !== 'cancelled') {
+            $periodEnd = max($periodEnd, $subscription->ends_at->timestamp);
+            $subscription->update(['status' => 'active', 'ends_at' => Carbon::createFromTimestamp($periodEnd)]);
         }
     }
 
@@ -487,7 +528,7 @@ class StripePaymentService
             if ($userSubscription) {
                 // You might want to send a notification to the user
                 // or mark the subscription as at risk
-                Log::warning('Subscription payment failed for user: ' . $userSubscription->user_id);
+                Log::warning('Subscription payment failed for user: '.$userSubscription->user_id);
             }
         }
     }
@@ -499,7 +540,7 @@ class StripePaymentService
     {
         $statusMap = [
             'active' => 'active',
-            'past_due' => 'active', // Still active but payment failed
+            'past_due' => 'pending', // Still active but payment failed
             'unpaid' => 'pending',
             'canceled' => 'cancelled',
             'incomplete' => 'pending',
@@ -531,6 +572,6 @@ class StripePaymentService
      */
     protected function generateTransactionId(): string
     {
-        return 'TXN_' . now()->format('YmdHis') . '_' . Str::random(6);
+        return 'TXN_'.now()->format('YmdHis').'_'.Str::random(6);
     }
 }

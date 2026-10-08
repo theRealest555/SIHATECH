@@ -2,11 +2,12 @@
 
 namespace Tests\Feature\Auth;
 
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\TestCase;
+use App\Models\Admin;
 use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Laravel\Sanctum\Sanctum;
+use Tests\TestCase;
 
 class ApiAuthenticationTest extends TestCase
 {
@@ -62,7 +63,7 @@ class ApiAuthenticationTest extends TestCase
         ]);
 
         $response->assertStatus(422) // Laravel returns 422 for failed authentication attempts
-                 ->assertJsonValidationErrors(['email']); // Breeze default returns error on 'email' field for general auth failure
+            ->assertJsonValidationErrors(['email']); // Breeze default returns error on 'email' field for general auth failure
         $this->assertGuest();
     }
 
@@ -74,7 +75,7 @@ class ApiAuthenticationTest extends TestCase
         ]);
 
         $response->assertStatus(422)
-                 ->assertJsonValidationErrors(['email']);
+            ->assertJsonValidationErrors(['email']);
         $this->assertGuest();
     }
 
@@ -83,7 +84,7 @@ class ApiAuthenticationTest extends TestCase
         $response = $this->postJson('/api/login', []); // [cite: therealest555/sihatech2/SIHATECH2-bfec2d9e1e08e8149fc892e74235c175d08bed7c/backend/routes/api.php]
 
         $response->assertStatus(422)
-                 ->assertJsonValidationErrors(['email', 'password']);
+            ->assertJsonValidationErrors(['email', 'password']);
     }
 
     public function test_authenticated_user_can_logout(): void
@@ -94,7 +95,7 @@ class ApiAuthenticationTest extends TestCase
         $response = $this->postJson('/api/logout'); // [cite: therealest555/sihatech2/SIHATECH2-bfec2d9e1e08e8149fc892e74235c175d08bed7c/backend/routes/api.php]
 
         $response->assertStatus(200)
-                 ->assertJson(['message' => 'Logged out successfully']);
+            ->assertJson(['message' => 'Logged out successfully']);
         // To fully test token invalidation, you might need to check if the token can be used again.
         // However, Sanctum's token invalidation is usually handled by its internals.
         // A simple check is that subsequent requests with the same token would fail,
@@ -117,8 +118,7 @@ class ApiAuthenticationTest extends TestCase
             'status' => 'actif',
         ]);
         // Ensure the Admin model record exists if your AdminAuthController checks it
-        // \App\Models\Admin::factory()->create(['user_id' => $adminUser->id, 'admin_status' => 1]);
-
+        Admin::factory()->create(['user_id' => $adminUser->id, 'admin_status' => 1]);
 
         $response = $this->postJson('/api/admin/login', [ // [cite: therealest555/sihatech2/SIHATECH2-bfec2d9e1e08e8149fc892e74235c175d08bed7c/backend/routes/api.php]
             'email' => 'admin@example.com',
@@ -161,13 +161,13 @@ class ApiAuthenticationTest extends TestCase
         $response = $this->postJson('/api/admin/logout'); // [cite: therealest555/sihatech2/SIHATECH2-bfec2d9e1e08e8149fc892e74235c175d08bed7c/backend/routes/api.php]
 
         $response->assertStatus(200)
-                 ->assertJson(['message' => 'Logged out successfully']);
+            ->assertJson(['message' => 'Logged out successfully']);
     }
 
     public function test_csrf_cookie_can_be_obtained(): void
     {
         $response = $this->get('/sanctum/csrf-cookie'); // [cite: therealest555/sihatech2/SIHATECH2-bfec2d9e1e08e8149fc892e74235c175d08bed7c/backend/routes/web.php]
-        $response->assertStatus(200)
-                 ->assertCookie('XSRF-TOKEN');
+        $response->assertStatus(204)
+            ->assertCookie('XSRF-TOKEN');
     }
 }

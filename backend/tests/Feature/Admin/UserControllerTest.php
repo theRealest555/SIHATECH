@@ -2,21 +2,21 @@
 
 namespace Tests\Feature\Admin;
 
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\TestCase;
-use App\Models\User;
 use App\Models\Admin;
 use App\Models\Doctor;
 use App\Models\Patient;
-use App\Models\AuditLog;
-use Laravel\Sanctum\Sanctum;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Laravel\Sanctum\Sanctum;
+use Tests\TestCase;
 
 class UserControllerTest extends TestCase
 {
     use RefreshDatabase;
 
     protected User $adminUser;
+
     protected User $targetUser;
 
     protected function setUp(): void
@@ -24,7 +24,7 @@ class UserControllerTest extends TestCase
         parent::setUp();
         $this->adminUser = User::factory()->create(['role' => 'admin', 'status' => 'actif']);
         // Ensure the admin user has an admin profile and it's active
-        if (!$this->adminUser->admin()->exists()) { // Check if the relationship exists
+        if (! $this->adminUser->admin()->exists()) { // Check if the relationship exists
             Admin::factory()->active()->create(['user_id' => $this->adminUser->id]);
         } else {
             $this->adminUser->admin->update(['admin_status' => 1]);
@@ -46,14 +46,14 @@ class UserControllerTest extends TestCase
             ->assertJsonStructure([
                 'current_page',
                 'data' => [
-                    '*' => ['id', 'nom', 'prenom', 'email', 'role', 'status']
+                    '*' => ['id', 'nom', 'prenom', 'email', 'role', 'status'],
                 ],
-                'total'
+                'total',
             ]);
-            // Adjust count assertion if necessary, as it depends on how many users are created by default
-            // For instance, if User::factory(5) creates 5 users + targetUser + adminUser = 7 total
-            // The controller might filter out the acting admin, so it could be 6.
-            // ->assertJsonCount(User::where('id', '!=', $this->adminUser->id)->count(), 'data');
+        // Adjust count assertion if necessary, as it depends on how many users are created by default
+        // For instance, if User::factory(5) creates 5 users + targetUser + adminUser = 7 total
+        // The controller might filter out the acting admin, so it could be 6.
+        // ->assertJsonCount(User::where('id', '!=', $this->adminUser->id)->count(), 'data');
     }
 
     public function test_admin_can_filter_users_by_role()
@@ -76,7 +76,6 @@ class UserControllerTest extends TestCase
             ->assertJsonFragment(['nom' => 'SearchMe']);
     }
 
-
     public function test_admin_can_store_new_admin_user()
     {
         $adminData = [
@@ -84,7 +83,9 @@ class UserControllerTest extends TestCase
             'prenom' => 'Test',
             'email' => 'newadmin@example.com',
             'password' => 'password123',
-            'telephone' => '0600000000'
+            'password_confirmation' => 'password123',
+            'current_password' => 'password',
+            'telephone' => '0600000000',
         ];
 
         $response = $this->postJson('/api/admin/users/admin', $adminData);
@@ -103,7 +104,7 @@ class UserControllerTest extends TestCase
 
     public function test_admin_can_update_user_status()
     {
-        $response = $this->putJson('/api/admin/users/' . $this->targetUser->id . '/status', ['status' => 'inactif']);
+        $response = $this->putJson('/api/admin/users/'.$this->targetUser->id.'/status', $this->statusDecision($this->targetUser, ['status' => 'inactif']));
 
         $response->assertStatus(200)
             ->assertJsonPath('message', 'User status updated successfully')
@@ -112,12 +113,12 @@ class UserControllerTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'updated_user_status', 'target_id' => $this->targetUser->id]);
     }
 
-     public function test_admin_can_update_admin_user_status()
+    public function test_admin_can_update_admin_user_status()
     {
         $otherAdminUser = User::factory()->create(['role' => 'admin']);
         $otherAdminProfile = Admin::factory()->create(['user_id' => $otherAdminUser->id, 'admin_status' => 1]);
 
-        $response = $this->putJson("/api/admin/admins/{$otherAdminProfile->id}/status", ['admin_status' => 0]);
+        $response = $this->putJson("/api/admin/admins/{$otherAdminProfile->id}/status", $this->statusDecision($otherAdminUser, ['admin_status' => 0]));
         $response->assertStatus(200)
             ->assertJsonPath('message', 'Admin status updated successfully')
             ->assertJsonPath('admin.admin_status', 0);
@@ -129,18 +130,19 @@ class UserControllerTest extends TestCase
         $doctorUser = User::factory()->create(['role' => 'medecin']);
         Doctor::factory()->create(['user_id' => $doctorUser->id]);
 
-        $response = $this->getJson('/api/admin/users/' . $doctorUser->id);
+        $response = $this->getJson('/api/admin/users/'.$doctorUser->id);
         $response->assertStatus(200)
             ->assertJsonPath('user.id', $doctorUser->id)
             ->assertJsonPath('doctor.user_id', $doctorUser->id);
     }
 
-
     public function test_admin_can_reset_user_password()
     {
         $newPassword = 'newPassword123';
-        $response = $this->putJson('/api/admin/users/' . $this->targetUser->id . '/password', [
-            'password' => $newPassword
+        $response = $this->putJson('/api/admin/users/'.$this->targetUser->id.'/password', [
+            'password' => $newPassword,
+            'password_confirmation' => $newPassword,
+            'current_password' => 'password',
         ]);
 
         $response->assertStatus(200)
@@ -151,23 +153,20 @@ class UserControllerTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'reset_user_password', 'target_id' => $this->targetUser->id]);
     }
 
-    public function test_admin_can_delete_user()
+    public function test_admin_cannot_permanently_delete_user()
     {
         $userToDelete = User::factory()->create();
-        $response = $this->deleteJson('/api/admin/users/' . $userToDelete->id);
+        $response = $this->deleteJson('/api/admin/users/'.$userToDelete->id);
 
-        $response->assertStatus(200)
-            ->assertJsonPath('message', 'User deleted successfully');
-        $this->assertDatabaseMissing('users', ['id' => $userToDelete->id]); // Soft deletes are not missing
-        // If using soft deletes, assert for deleted_at column:
-        // $this->assertSoftDeleted('users', ['id' => $userToDelete->id]);
-        $this->assertDatabaseHas('audit_logs', ['action' => 'deleted_user', 'target_id' => $userToDelete->id]);
+        $response->assertStatus(409)->assertJsonPath('code', 'account_deletion_unavailable');
+        $this->assertDatabaseHas('users', ['id' => $userToDelete->id]);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'deleted_user', 'target_id' => $userToDelete->id]);
     }
 
     public function test_non_active_admin_cannot_perform_actions()
     {
         // Ensure the admin relationship exists before trying to update it
-        if (!$this->adminUser->admin) {
+        if (! $this->adminUser->admin) {
             Admin::factory()->active()->create(['user_id' => $this->adminUser->id]);
             $this->adminUser->refresh();
         }
@@ -181,6 +180,6 @@ class UserControllerTest extends TestCase
         // For this test, we assume the ActiveUser middleware correctly checks the DB.
 
         $response = $this->getJson('/api/admin/users');
-        $response->assertStatus(403)->assertJson(['message' => 'Unauthorized access']);
+        $response->assertStatus(403)->assertJson(['message' => 'Administrator access is disabled.']);
     }
 }

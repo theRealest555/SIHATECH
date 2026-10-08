@@ -1,385 +1,68 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace Tests\Feature\Api;
 
+use App\Jobs\ProcessPayment;
 use App\Models\Abonnement;
-use App\Models\UserSubscription;
 use App\Models\Payment;
+use App\Models\User;
+use App\Models\UserSubscription;
 use App\Services\StripePaymentService;
-use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse;
-use Carbon\Carbon;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB; // Keep for potential other uses, but not for the conflicting transaction
-use Illuminate\Support\Facades\Log;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
+use Laravel\Sanctum\Sanctum;
+use Tests\TestCase;
 
-class SubscriptionController extends Controller
+class SubscriptionControllerTest extends TestCase
 {
-    protected $stripeService;
+    use RefreshDatabase;
 
-    public function __construct(StripePaymentService $stripeService)
+    public function test_resource_creation_does_not_grant_paid_access(): void
     {
-        $this->stripeService = $stripeService;
-    }
-
-    // ... (getPlans, getSetupIntent methods remain the same) ...
-    public function getPlans(): JsonResponse
-    {
-        $plans = Abonnement::where('is_active', true)->get()->map(function ($plan) {
-            return [
-                'id' => $plan->id,
-                'name' => $plan->name,
-                'description' => $plan->description,
-                'price' => $plan->price,
-                'billing_cycle' => $plan->billing_cycle,
-                'features' => $plan->features,
-                'stripe_price_id' => $plan->stripe_price_id ?? null,
-                'popular' => $plan->name === 'Premium', //
-            ];
-        });
-
-        return response()->json([
-            'status' => 'success',
-            'data' => $plans
+        $user = User::factory()->create(['role' => 'patient', 'status' => 'actif']);
+        $plan = Abonnement::factory()->create(['is_active' => true]);
+        Sanctum::actingAs($user);
+        $service = $this->mock(StripePaymentService::class);
+        $service->shouldReceive('processPayment')->once()->andReturn([
+            'success' => true, 'subscription' => (object) ['id' => 'sub_test'],
+            'payment' => null, 'client_secret' => 'secret_test',
         ]);
+        $this->postJson('/api/subscriptions/subscribe', ['plan_id' => $plan->id, 'expected_plan_version' => 0, 'payment_method_id' => 'pm_test'])
+            ->assertOk()->assertJsonPath('data.subscription.status', 'pending');
+        $this->assertDatabaseMissing('user_subscriptions', ['user_id' => $user->id, 'status' => 'active']);
     }
 
-    public function getSetupIntent(): JsonResponse
+    public function test_queue_job_cannot_complete_an_unpaid_payment(): void
     {
-        try {
-            $user = Auth::user();
-            $customer = $this->stripeService->getOrCreateCustomer($user); //
+        Notification::fake();
+        $subscription = UserSubscription::factory()->create(['status' => 'pending']);
+        $payment = Payment::factory()->create(['user_subscription_id' => $subscription->id, 'status' => 'pending']);
+        (new ProcessPayment($payment))->handle(app(StripePaymentService::class));
+        $this->assertSame('pending', $payment->fresh()->status);
+        $this->assertSame('pending', $subscription->fresh()->status);
+        Notification::assertNothingSent();
+    }
 
-            $setupIntent = $this->stripeService->createStripeSetupIntent($customer->id); //
-
-            return response()->json([
-                'status' => 'success',
-                'client_secret' => $setupIntent->client_secret,
-                'customer_id' => $customer->id,
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Setup intent creation failed: ' . $e->getMessage());
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Failed to initialize payment setup',
-                'error' => $e->getMessage()
-            ], 500);
+    public function test_signed_invoice_webhooks_are_idempotent_and_use_the_provider_period(): void
+    {
+        config(['services.stripe.webhook_secret' => 'whsec_regression']);
+        $subscription = UserSubscription::factory()->create(['status' => 'pending', 'payment_method' => ['stripe_subscription_id' => 'sub_test']]);
+        Payment::factory()->create(['user_subscription_id' => $subscription->id, 'status' => 'pending']);
+        $end = now()->addYear()->startOfSecond()->timestamp;
+        $event = ['id' => 'evt_paid', 'object' => 'event', 'created' => time(), 'type' => 'invoice.payment_succeeded', 'data' => ['object' => [
+            'id' => 'in_paid', 'object' => 'invoice', 'subscription' => 'sub_test', 'amount_paid' => 12000, 'currency' => 'mad',
+            'lines' => ['data' => [['period' => ['end' => $end]]]],
+        ]]];
+        $service = app(StripePaymentService::class);
+        foreach (['evt_paid', 'evt_paid', 'evt_duplicate_invoice'] as $id) {
+            $event['id'] = $id;
+            $payload = json_encode($event);
+            $time = time();
+            $signature = 't='.$time.',v1='.hash_hmac('sha256', $time.'.'.$payload, 'whsec_regression');
+            $this->assertTrue($service->handleWebhook($payload, $signature)['success']);
         }
+        $this->assertSame(1, Payment::where('user_subscription_id', $subscription->id)->count());
+        $this->assertSame('active', $subscription->fresh()->status);
+        $this->assertSame($end, $subscription->fresh()->ends_at->timestamp);
     }
-
-    public function subscribe(Request $request): JsonResponse
-    {
-        $request->validate([
-            'plan_id' => 'required|exists:abonnements,id',
-            'payment_method_id' => 'required|string',
-        ]);
-
-        try {
-            // The DB::transaction wrapper is removed/commented out for tests
-            // return DB::transaction(function () use ($request) { // Keep this commented for tests if it causes issues
-                $user = Auth::user();
-                $plan = Abonnement::findOrFail($request->plan_id);
-
-                $existingSubscription = UserSubscription::where('user_id', $user->id)
-                    ->where('status', 'active')
-                    ->first();
-
-                if ($existingSubscription) {
-                    $this->cancelExistingSubscription($existingSubscription);
-                }
-
-                $startsAt = now();
-                $endsAt = $plan->billing_cycle === 'monthly'
-                    ? $startsAt->copy()->addMonth()
-                    : $startsAt->copy()->addYear();
-
-                $subscription = UserSubscription::create([
-                    'user_id' => $user->id,
-                    'subscription_plan_id' => $plan->id,
-                    'status' => 'pending',
-                    'starts_at' => $startsAt,
-                    'ends_at' => $endsAt,
-                    'payment_method' => [
-                        'type' => 'stripe',
-                        'payment_method_id' => $request->payment_method_id,
-                    ]
-                ]);
-
-                $paymentResult = $this->stripeService->processPayment([
-                    'amount' => $plan->price,
-                    'currency' => 'MAD',
-                    'user_id' => $user->id,
-                    'user' => $user,
-                    'subscription_id' => $subscription->id,
-                    'subscription_plan_id' => $plan->id,
-                    'price_id' => $plan->stripe_price_id,
-                    'payment_method_id' => $request->payment_method_id,
-                    'description' => "Abonnement {$plan->name} pour {$user->prenom} {$user->nom}",
-                ]);
-
-                if ($paymentResult['success']) {
-                    $subscription->update([
-                        'status' => 'active',
-                        'payment_method' => array_merge($subscription->payment_method, [
-                            'stripe_subscription_id' => $paymentResult['subscription']->id ?? null,
-                        ])
-                    ]);
-                    $subscription->load('subscriptionPlan');
-                    return response()->json([
-                        'status' => 'success',
-                        'message' => 'Abonnement créé avec succès',
-                        'data' => [
-                            'subscription' => $subscription,
-                            'payment' => $paymentResult['payment'],
-                            'client_secret' => $paymentResult['client_secret'] ?? null,
-                        ]
-                    ]);
-                }
-
-                $subscription->update(['status' => 'cancelled']);
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Échec du paiement',
-                    'error' => $paymentResult['error'] ?? 'Unknown payment error'
-                ], 400);
-            // }); // End of original DB::transaction (commented out)
-        } catch (\Exception $e) {
-            Log::error('Subscription creation failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Failed to create subscription',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    protected function cancelExistingSubscription(UserSubscription $subscription): void
-    {
-        if (!empty($subscription->payment_method['stripe_subscription_id'])) {
-            try {
-                $this->stripeService->cancelSubscription(
-                    $subscription->payment_method['stripe_subscription_id']
-                );
-            } catch (\Exception $e) {
-                Log::error('Failed to cancel existing Stripe subscription: ' . $e->getMessage());
-            }
-        }
-        $subscription->update([
-            'status' => 'cancelled',
-            'cancelled_at' => now(),
-        ]);
-    }
-
-
-    public function cancelSubscription(): JsonResponse
-    {
-        try {
-            $user = Auth::user();
-            $subscription = UserSubscription::where('user_id', $user->id)
-                ->where('status', 'active')
-                ->first();
-
-            if (!$subscription) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Aucun abonnement actif trouvé'
-                ], 404);
-            }
-
-            if (!empty($subscription->payment_method['stripe_subscription_id'])) {
-                $result = $this->stripeService->cancelSubscription(
-                    $subscription->payment_method['stripe_subscription_id']
-                );
-                if (!$result['success']) {
-                    Log::error('Failed to cancel Stripe subscription', [
-                        'subscription_id' => $subscription->id,
-                        'error' => $result['error'] ?? 'Unknown Stripe cancellation error'
-                    ]);
-                }
-            }
-
-            $subscription->update([
-                'status' => 'cancelled',
-                'cancelled_at' => now()
-            ]);
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Abonnement annulé avec succès',
-                'data' => [
-                    'subscription' => $subscription,
-                    'effective_until' => $subscription->ends_at->format('Y-m-d'),
-                ]
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Subscription cancellation failed: ' . $e->getMessage());
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Failed to cancel subscription',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    public function updatePaymentMethod(Request $request): JsonResponse
-    {
-        $request->validate([
-            'payment_method_id' => 'required|string',
-        ]);
-
-        try {
-            $user = Auth::user();
-            $subscription = UserSubscription::where('user_id', $user->id)
-                ->where('status', 'active')
-                ->first();
-
-            if (!$subscription) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'No active subscription found'
-                ], 404);
-            }
-
-            $result = $this->stripeService->updateSubscriptionPaymentMethod(
-                $user,
-                $subscription->payment_method['stripe_subscription_id'] ?? null,
-                $request->payment_method_id
-            );
-
-            if (!$result['success']) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Failed to update payment method with Stripe',
-                    'error' => $result['error'] ?? 'Unknown error'
-                ], 500);
-            }
-
-            $subscription->update([
-                'payment_method' => array_merge($subscription->payment_method, [
-                    'payment_method_id' => $request->payment_method_id,
-                    'updated_at' => now(),
-                ])
-            ]);
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Payment method updated successfully',
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Payment method update failed: ' . $e->getMessage());
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Failed to update payment method',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-
-    public function getUserSubscription(): JsonResponse
-    {
-        $user = Auth::user();
-        $subscription = UserSubscription::with('subscriptionPlan')
-            ->where('user_id', $user->id)
-            ->where('status', 'active')
-            ->first();
-
-        if (!$subscription) {
-            return response()->json([
-                'status' => 'success',
-                'data' => null,
-                'message' => 'No active subscription'
-            ]);
-        }
-
-        $payments = Payment::where('user_subscription_id', $subscription->id)
-            ->where('status', 'completed')
-            ->orderBy('created_at', 'desc')
-            ->limit(5)
-            ->get();
-
-        return response()->json([
-            'status' => 'success',
-            'data' => [
-                'subscription' => $subscription,
-                'next_billing_date' => $subscription->ends_at->format('Y-m-d'),
-                'days_remaining' => $subscription->getRemainingDays(), //
-                'is_expiring_soon' => $subscription->getRemainingDays() <= 7, //
-                'recent_payments' => $payments->map(function ($payment) {
-                    return [
-                        'id' => $payment->id,
-                        'amount' => $payment->amount,
-                        'currency' => $payment->currency,
-                        'date' => $payment->created_at->format('Y-m-d'),
-                        'transaction_id' => $payment->transaction_id,
-                    ];
-                }),
-            ]
-        ]);
-    }
-
-    public function getSubscriptionHistory(): JsonResponse
-    {
-        $user = Auth::user();
-
-        $subscriptions = UserSubscription::with('subscriptionPlan')
-            ->where('user_id', $user->id)
-            ->orderBy('created_at', 'desc')
-            ->get()
-            ->map(function ($subscription) {
-                return [
-                    'id' => $subscription->id,
-                    'plan_name' => $subscription->subscriptionPlan->name ?? 'Unknown', //
-                    'status' => $subscription->status,
-                    'starts_at' => $subscription->starts_at->format('Y-m-d'),
-                    'ends_at' => $subscription->ends_at->format('Y-m-d'),
-                    'cancelled_at' => $subscription->cancelled_at ? $subscription->cancelled_at->format('Y-m-d') : null,
-                    'amount' => $subscription->subscriptionPlan->price ?? 0, //
-                    'billing_cycle' => $subscription->subscriptionPlan->billing_cycle ?? 'monthly', //
-                ];
-            });
-
-        return response()->json([
-            'status' => 'success',
-            'data' => $subscriptions
-        ]);
-    }
-
-    public function getPaymentHistory(): JsonResponse
-    {
-        $user = Auth::user();
-
-        $payments = Payment::where('user_id', $user->id)
-            ->with('userSubscription.subscriptionPlan') //
-            ->orderBy('created_at', 'desc')
-            ->paginate(10);
-
-        $payments->getCollection()->transform(function ($payment) {
-            return [
-                'id' => $payment->id,
-                'transaction_id' => $payment->transaction_id,
-                'amount' => $payment->amount,
-                'currency' => $payment->currency,
-                'status' => $payment->status,
-                'payment_method' => $payment->payment_method,
-                'date' => $payment->created_at->format('Y-m-d H:i:s'),
-                'plan_name' => $payment->userSubscription && $payment->userSubscription->subscriptionPlan ? $payment->userSubscription->subscriptionPlan->name : 'One-time payment', //
-                'invoice_url' => $payment->payment_data['invoice_url'] ?? null,
-            ];
-        });
-
-        return response()->json([
-            'status' => 'success',
-            'data' => $payments->items(),
-            'meta' => [
-                'current_page' => $payments->currentPage(),
-                'from' => $payments->firstItem(),
-                'last_page' => $payments->lastPage(),
-                'per_page' => $payments->perPage(),
-                'to' => $payments->lastItem(),
-                'total' => $payments->total(),
-            ],
-        ]);
-    }
-
 }

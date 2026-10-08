@@ -1,8 +1,8 @@
 <?php
 
-use Illuminate\Foundation\Inspiring;
-use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schedule;
 
-Artisan::command('inspire', function () {
-    $this->comment(Inspiring::quote());
-})->purpose('Display an inspiring quote')->hourly();
+Schedule::command('ops:heartbeat')->everyMinute()->withoutOverlapping(2);
+Schedule::command('documents:cleanup-files')->everyFiveMinutes()->withoutOverlapping(10);
+Schedule::command('appointments:send-reminders')->everyFiveMinutes()->withoutOverlapping(10)
+    ->when(fn () => config('operations.appointment_reminders_enabled'));

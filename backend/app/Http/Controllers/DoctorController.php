@@ -2,19 +2,19 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-use App\Http\Requests\SearchDoctorsAdvancedRequest;
 use App\Http\Requests\Doctor\UpdateDoctorLanguagesRequest;
+use App\Http\Requests\SearchDoctorsAdvancedRequest;
 use App\Models\Doctor;
-use App\Models\Speciality;
+use App\Models\Language;
 use App\Models\Leave;
 use App\Models\Location;
-use App\Models\Language;
+use App\Models\Speciality;
+use App\Services\AppointmentAvailability;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 
 class DoctorController extends Controller
 {
@@ -24,7 +24,7 @@ class DoctorController extends Controller
             ->verified()
             ->active()
             ->get()
-            ->map(fn($doctor) => [
+            ->map(fn ($doctor) => [
                 'id' => $doctor->id,
                 'name' => $doctor->full_name,
                 'speciality' => $doctor->speciality ? $doctor->speciality->nom : 'N/A',
@@ -45,12 +45,14 @@ class DoctorController extends Controller
     public function specialities(): JsonResponse
     {
         $specialities = Speciality::orderBy('nom')->get();
+
         return response()->json(['data' => $specialities]);
     }
 
     public function languages(): JsonResponse
     {
         $languages = Language::orderBy('nom')->get();
+
         return response()->json(['data' => $languages]);
     }
 
@@ -114,7 +116,7 @@ class DoctorController extends Controller
                 'is_active' => $doctor->is_active, // Added this line
             ];
 
-            if (!empty($validated['date'])) {
+            if (! empty($validated['date'])) {
                 $doctorData['available_slots'] = $this->getAvailableSlots($doctor, $validated['date']);
             }
 
@@ -133,6 +135,8 @@ class DoctorController extends Controller
                 'by' => $sortBy,
                 'order' => $sortOrder,
             ],
+            'timezone' => config('app.timezone'),
+            'today' => today()->toDateString(),
         ];
 
         return response()->json([
@@ -156,10 +160,11 @@ class DoctorController extends Controller
 
     public function show(int $doctorId): JsonResponse
     {
-        $doctor = Doctor::with(['user', 'speciality', 'languages', 'location', 'documents' => function($query) {
+        $doctor = Doctor::with(['user', 'speciality', 'languages', 'location', 'documents' => function ($query) {
             $query->where('status', 'approved');
         }])
-        ->findOrFail($doctorId);
+            ->verified()->active()
+            ->findOrFail($doctorId);
 
         return response()->json([
             'data' => [
@@ -181,7 +186,8 @@ class DoctorController extends Controller
                 'is_active' => $doctor->is_active,
                 'photo' => $doctor->user->photo,
                 'documents_count' => $doctor->documents->count(),
-            ]
+            ],
+            'meta' => ['timezone' => config('app.timezone'), 'today' => today()->toDateString()],
         ]);
     }
 
@@ -189,10 +195,10 @@ class DoctorController extends Controller
     {
         $doctor = $request->user()->doctor;
 
-        if (!$doctor) {
+        if (! $doctor) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Doctor profile not found'
+                'message' => 'Doctor profile not found',
             ], 404);
         }
 
@@ -204,8 +210,8 @@ class DoctorController extends Controller
             'status' => 'success',
             'message' => 'Languages updated successfully',
             'data' => [
-                'languages' => $doctor->languages()->get()
-            ]
+                'languages' => $doctor->languages()->get(),
+            ],
         ]);
     }
 
@@ -221,11 +227,11 @@ class DoctorController extends Controller
                     'schedule' => $schedule,
                     'leaves' => $leaves,
                     'languages' => $doctor->languages,
-                ]
+                ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching availability for doctor ID ' . $doctorId . ': ' . $e->getMessage(), [
-                'trace' => $e->getTraceAsString()
+            Log::error('Error fetching availability for doctor ID '.$doctorId.': '.$e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json(['error' => 'Failed to fetch availability'], 500);
@@ -245,11 +251,11 @@ class DoctorController extends Controller
                     'doctor_id' => $doctorId,
                     'date' => $date,
                     'total_slots' => count($slots),
-                ]
+                ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching slots for doctor ID ' . $doctorId . ': ' . $e->getMessage(), [
-                'trace' => $e->getTraceAsString()
+            Log::error('Error fetching slots for doctor ID '.$doctorId.': '.$e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json(['error' => 'Failed to fetch slots'], 500);
@@ -258,7 +264,7 @@ class DoctorController extends Controller
 
     public function statistics(int $doctorId): JsonResponse
     {
-        $doctor = Doctor::findOrFail($doctorId);
+        $doctor = Doctor::verified()->active()->findOrFail($doctorId);
 
         $stats = [
             'total_appointments' => $doctor->appointments()->count(),
@@ -280,82 +286,7 @@ class DoctorController extends Controller
 
     protected function getAvailableSlots(Doctor $doctor, string $date): array
     {
-        try {
-            $parsedDate = Carbon::parse($date);
-            $dayOfWeek = strtolower($parsedDate->format('l'));
-
-            $dayMap = [
-                'monday' => 'lundi',
-                'tuesday' => 'mardi',
-                'wednesday' => 'mercredi',
-                'thursday' => 'jeudi',
-                'friday' => 'vendredi',
-                'saturday' => 'samedi',
-                'sunday' => 'dimanche',
-            ];
-
-            $frenchDay = $dayMap[$dayOfWeek] ?? $dayOfWeek;
-
-            $isOnLeave = $doctor->leaves()
-                ->where('start_date', '<=', $parsedDate)
-                ->where('end_date', '>=', $parsedDate)
-                ->exists();
-
-            if ($isOnLeave) {
-                return [];
-            }
-
-            $horaires = $doctor->horaires ?? [];
-            $dailySchedule = $horaires[$frenchDay] ?? [];
-
-            Log::info('getAvailableSlots debug', [
-                'doctor_id' => $doctor->id,
-                'date' => $date,
-                'day' => $frenchDay, // Use frenchDay for logging
-                'horaires_from_db' => $doctor->getRawOriginal('horaires'), // Log raw value
-                'horaires_casted' => $horaires, // Log casted value
-                'daily_horaires' => $dailySchedule,
-            ]);
-
-
-            $slots = [];
-            $slotDuration = 30;
-
-            foreach ($dailySchedule as $timeRange) {
-                if (is_string($timeRange) && strpos($timeRange, '-') !== false) {
-                    [$start, $end] = explode('-', $timeRange);
-                    $start = trim($start);
-                    $end = trim($end);
-
-                    if (preg_match('/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/', $start) &&
-                        preg_match('/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/', $end)) {
-                        $startTime = Carbon::parse($date . ' ' . $start);
-                        $endTime = Carbon::parse($date . ' ' . $end);
-
-                        while ($startTime < $endTime) {
-                            $slots[] = $startTime->format('H:i');
-                            $startTime->addMinutes($slotDuration);
-                        }
-                    } else {
-                        Log::warning('Invalid time range format in schedule', ['timeRange' => $timeRange, 'doctor_id' => $doctor->id]);
-                    }
-                } else {
-                     Log::warning('Time range is not a valid string or format for doctor schedule', ['timeRange' => $timeRange, 'doctor_id' => $doctor->id]);
-                }
-            }
-
-            $bookedSlots = $doctor->appointments()
-                ->whereDate('date_heure', $parsedDate)
-                ->whereNotIn('statut', ['annulé', 'no_show'])
-                ->pluck('date_heure')
-                ->map(fn($dt) => Carbon::parse($dt)->format('H:i'))
-                ->toArray();
-
-            return array_values(array_diff($slots, $bookedSlots));
-        } catch (\Exception $e) {
-            Log::error('Error in getAvailableSlots: ' . $e->getMessage());
-            return [];
-        }
+        return app(AppointmentAvailability::class)->slots($doctor, Carbon::parse($date));
     }
 
     public function updateSchedule(Request $request, int $doctorId): JsonResponse
@@ -376,7 +307,7 @@ class DoctorController extends Controller
         $days = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
 
         foreach ($days as $day) {
-            if ($request->has($day) && !empty($request->input($day))) {
+            if ($request->has($day) && ! empty($request->input($day))) {
                 // Assuming input is a comma-separated string of time ranges
                 $horaires[$day] = array_map('trim', explode(',', $request->input($day)));
             } else {
@@ -388,7 +319,7 @@ class DoctorController extends Controller
 
         return response()->json([
             'message' => 'Schedule updated successfully',
-            'data' => $horaires
+            'data' => $horaires,
         ]);
     }
 
@@ -413,15 +344,16 @@ class DoctorController extends Controller
         $user = Auth::user();
         Log::info('Authenticated user', ['user' => $user ? json_decode(json_encode($user), true) : null]);
 
-        if (!$user || ($user->role === 'medecin' && $user->doctor->id != $doctorId) && $user->role !== 'admin') {
+        if (! $user || ($user->role === 'medecin' && $user->doctor->id != $doctorId) && $user->role !== 'admin') {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
         $leave = Leave::where('id', $leaveId)->where('doctor_id', $doctorId)->first();
         Log::info('Leave query result', ['leave' => $leave ? $leave->toArray() : null]);
 
-        if (!$leave) {
+        if (! $leave) {
             Log::warning('Leave not found', ['doctorId' => $doctorId, 'leaveId' => $leaveId]);
+
             return response()->json(['message' => 'Leave not found'], 404);
         }
 
@@ -430,7 +362,7 @@ class DoctorController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Leave deleted successfully'
+            'message' => 'Leave deleted successfully',
         ]);
     }
 }

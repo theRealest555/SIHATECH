@@ -11,7 +11,9 @@ use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable implements MustVerifyEmail
 {
-    use HasFactory, Notifiable, HasApiTokens;
+    use HasApiTokens, HasFactory, Notifiable;
+
+    protected $attributes = ['auth_version' => 0];
 
     protected $fillable = [
         'nom',
@@ -33,12 +35,14 @@ class User extends Authenticatable implements MustVerifyEmail
     protected $hidden = [
         'password',
         'remember_token',
+        'auth_version',
     ];
 
     protected $casts = [
         'email_verified_at' => 'datetime',
         'date_de_naissance' => 'date',
         'password' => 'hashed',
+        'auth_version' => 'integer',
     ];
 
     /**
@@ -91,6 +95,13 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->role === 'admin';
     }
 
+    public function isApprovedAdmin(): bool
+    {
+        return $this->role === 'admin'
+            && $this->status === 'actif'
+            && $this->admin()->where('admin_status', 1)->exists();
+    }
+
     public function isActive(): bool
     {
         return $this->status === 'actif';
@@ -98,7 +109,7 @@ class User extends Authenticatable implements MustVerifyEmail
 
     public function isVerified(): bool
     {
-        return !is_null($this->email_verified_at);
+        return ! is_null($this->email_verified_at);
     }
 
     /**
@@ -106,7 +117,7 @@ class User extends Authenticatable implements MustVerifyEmail
      */
     public function getFullNameAttribute(): string
     {
-        return $this->prenom . ' ' . $this->nom;
+        return $this->prenom.' '.$this->nom;
     }
 
     /**

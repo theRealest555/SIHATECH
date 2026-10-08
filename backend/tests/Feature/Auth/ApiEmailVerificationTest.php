@@ -2,19 +2,30 @@
 
 namespace Tests\Feature\Auth;
 
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\TestCase;
 use App\Models\User;
+use App\Notifications\VerifyEmailNotification;
+use Illuminate\Auth\Events\Verified;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\URL;
-use Illuminate\Auth\Events\Verified;
-use Illuminate\Support\Facades\Event;
-use App\Notifications\VerifyEmailNotification; // [cite: therealest555/sihatech2/SIHATECH2-bfec2d9e1e08e8149fc892e74235c175d08bed7c/backend/app/Notifications/VerifyEmailNotification.php]
-use Laravel\Sanctum\Sanctum;
+use Laravel\Sanctum\Sanctum; // [cite: therealest555/sihatech2/SIHATECH2-bfec2d9e1e08e8149fc892e74235c175d08bed7c/backend/app/Notifications/VerifyEmailNotification.php]
+use Tests\TestCase;
 
 class ApiEmailVerificationTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_email_link_uses_web_session_without_spa_origin(): void
+    {
+        $user = User::factory()->create(['email_verified_at' => null]);
+        $url = URL::temporarySignedRoute('verification.verify', now()->addHour(), [
+            'id' => $user->id, 'hash' => sha1($user->email),
+        ]);
+        $this->assertContains('web', app('router')->getRoutes()->getByName('verification.verify')->gatherMiddleware());
+        $this->actingAs($user, 'web')->get($url)->assertRedirect(config('verification.redirect.success'));
+        $this->assertTrue($user->fresh()->hasVerifiedEmail());
+    }
 
     public function test_email_can_be_verified_via_api_route(): void
     {
@@ -39,7 +50,7 @@ class ApiEmailVerificationTest extends TestCase
         Event::assertDispatched(Verified::class);
 
         // Check the redirect URL from your config/verification.php [cite: therealest555/sihatech2/SIHATECH2-bfec2d9e1e08e8149fc892e74235c175d08bed7c/backend/config/verification.php]
-        $expectedRedirect = config('verification.redirect.success', env('FRONTEND_URL', 'http://localhost:3000') . '/dashboard?verified=1');
+        $expectedRedirect = config('verification.redirect.success', env('FRONTEND_URL', 'http://localhost:3000').'/dashboard?verified=1');
         $response->assertRedirect($expectedRedirect);
     }
 
@@ -91,7 +102,7 @@ class ApiEmailVerificationTest extends TestCase
         Sanctum::actingAs($user);
         $response = $this->get($verificationUrl);
 
-        $expectedRedirect = config('verification.redirect.already_verified', env('FRONTEND_URL', 'http://localhost:3000') . '/dashboard?verified=1');
+        $expectedRedirect = config('verification.redirect.already_verified', env('FRONTEND_URL', 'http://localhost:3000').'/dashboard?verified=1');
         $response->assertRedirect($expectedRedirect);
     }
 
@@ -104,25 +115,19 @@ class ApiEmailVerificationTest extends TestCase
         $response = $this->postJson('/api/email/verification-notification'); // [cite: therealest555/sihatech2/SIHATECH2-bfec2d9e1e08e8149fc892e74235c175d08bed7c/backend/routes/api.php]
 
         $response->assertStatus(200)
-                 ->assertJson(['status' => 'verification-link-sent']);
+            ->assertJson(['status' => 'verification-link-sent']);
 
         Notification::assertSentTo($user, VerifyEmailNotification::class); // [cite: therealest555/sihatech2/SIHATECH2-bfec2d9e1e08e8149fc892e74235c175d08bed7c/backend/app/Notifications/VerifyEmailNotification.php]
     }
 
-    public function test_verified_user_requesting_new_verification_email_is_redirected_via_api(): void
+    public function test_verified_user_requesting_new_verification_email_gets_json_via_api(): void
     {
         $user = User::factory()->create(['email_verified_at' => now()]);
         Sanctum::actingAs($user);
 
         $response = $this->postJson('/api/email/verification-notification'); // [cite: therealest555/sihatech2/SIHATECH2-bfec2d9e1e08e8149fc892e74235c175d08bed7c/backend/routes/api.php]
 
-        // The EmailVerificationNotificationController redirects if already verified.
-        // For an API, it might be better to return a JSON response.
-        // Current Breeze setup redirects.
-        $response->assertRedirect('/dashboard'); // Or your intended redirect for already verified users from this controller action.
-                                                // If it's API only, it should ideally be a JSON response.
-                                                // Let's assume it redirects as per Breeze web behavior for now.
-                                                // If your controller is API-specific, adjust this assertion.
+        $response->assertOk()->assertJson(['status' => 'already-verified']);
     }
 
     public function test_unauthenticated_user_cannot_request_verification_email_via_api(): void

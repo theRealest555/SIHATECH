@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Doctor;
 
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UploadDocumentRequest extends FormRequest
@@ -17,12 +18,12 @@ class UploadDocumentRequest extends FormRequest
     /**
      * Get the validation rules that apply to the request.
      *
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
         return [
-            'file' => ['required', 'file', 'max:10240'], // 10MB max
+            'file' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'], // 10MB max
             'type' => ['required', 'in:licence,cni,diplome,autre'],
         ];
     }

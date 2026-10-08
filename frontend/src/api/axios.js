@@ -3,7 +3,8 @@ import axios from 'axios';
 
 const apiClient = axios.create({
     baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000', // Ensure this is in your .env
-    withCredentials: true, // Important for Sanctum to send cookies
+    withCredentials: true,
+    withXSRFToken: true, // Important for Sanctum to send cookies
     headers: {
         'X-Requested-With': 'XMLHttpRequest',
         'Accept': 'application/json',

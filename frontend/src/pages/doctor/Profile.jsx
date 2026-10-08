@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import DoctorAvatar from '../../components/ui/DoctorAvatar';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Container, Row, Col, Card, Form, Button, Alert, Badge, Tabs, Tab, Modal, Spinner } from 'react-bootstrap';
 import { useDispatch, useSelector } from 'react-redux';
@@ -49,9 +50,9 @@ const DoctorProfile = () => {
     date_de_naissance: '',
     speciality_id: '', // Will hold the ID of the speciality
     description: '',
-    horaires: {} // Assuming horaires is an object like {lundi: ["09:00-12:00"], ...}
   });
   
+  const [emailPassword, setEmailPassword] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [errors, setErrors] = useState({}); // For client-side and backend validation errors
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -76,8 +77,9 @@ const DoctorProfile = () => {
 
   // Populate form when profile data is loaded or updated
   useEffect(() => {
-    if (profile && profile.user && profile.doctor) {
+    if (profile && profile.user && profile.doctor && !isEditing) {
       setFormData({
+        expected_profile_revision: profile.profile_revision,
         nom: profile.user.nom || '',
         prenom: profile.user.prenom || '',
         email: profile.user.email || '',
@@ -87,10 +89,9 @@ const DoctorProfile = () => {
         date_de_naissance: profile.user.date_de_naissance ? profile.user.date_de_naissance.split('T')[0] : '', // Format date
         speciality_id: profile.doctor.speciality_id || '',
         description: profile.doctor.description || '',
-        horaires: profile.doctor.horaires || {} // Expects an object
       });
     }
-  }, [profile]);
+  }, [profile, isEditing]);
 
   // Handle form input changes
   const handleChange = (e) => {
@@ -145,12 +146,13 @@ const DoctorProfile = () => {
   };
 
   // Toggle edit mode
-  const handleEdit = () => setIsEditing(true);
+  const handleEdit = event => { event.preventDefault(); setIsEditing(true); };
   const handleCancelEdit = () => {
     setIsEditing(false);
     // Reset form to profile data if needed (useEffect already does this on profile change)
     if (profile && profile.user && profile.doctor) {
          setFormData({
+            expected_profile_revision: profile.profile_revision,
             nom: profile.user.nom || '',
             prenom: profile.user.prenom || '',
             email: profile.user.email || '',
@@ -160,7 +162,6 @@ const DoctorProfile = () => {
             date_de_naissance: profile.user.date_de_naissance ? profile.user.date_de_naissance.split('T')[0] : '',
             speciality_id: profile.doctor.speciality_id || '',
             description: profile.doctor.description || '',
-            horaires: profile.doctor.horaires || {}
         });
     }
     setErrors({});
@@ -171,9 +172,14 @@ const DoctorProfile = () => {
     e.preventDefault();
     if (!await validateProfileForm()) return;
 
-    dispatch(updateUserProfile(formData))
+    dispatch(updateUserProfile({ ...formData, current_password: formData.email !== profile?.user?.email ? emailPassword : undefined }))
       .unwrap()
-      .then(() => {
+      .then(result => {
+        setEmailPassword('');
+        if (result.email_verification_required) {
+          navigate('/verify-email', { replace: true });
+          return;
+        }
         setIsEditing(false);
         toast.success('Profile updated successfully!');
         dispatch(fetchUserProfile()); // Re-fetch to ensure UI consistency
@@ -194,7 +200,7 @@ const DoctorProfile = () => {
       .then(() => {
         setShowPasswordModal(false);
         setPasswordData({ current_password: '', password: '', password_confirmation: '' });
-        toast.success('Password updated successfully!');
+        toast.success('Password updated. Other devices must sign in again.');
       })
       .catch(error => {
         if (error.errors) setPasswordErrors(error.errors);
@@ -262,7 +268,7 @@ const DoctorProfile = () => {
   }
 
   return (
-    <Container className="py-4" style={{ background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', minHeight: '100vh' }}>
+    <Container className="py-4 profile-workspace">
       <Row>
         <Col lg={12}>
           {/* Profile Header */}
@@ -271,16 +277,12 @@ const DoctorProfile = () => {
               <Row className="align-items-center">
                 <Col md={2} className="text-center">
                   <div className="position-relative d-inline-block">
-                    <img
-                      src={profile?.user?.photo ? `http://localhost:8000/storage/${profile.user.photo}` : 'https://via.placeholder.com/150'}
-                      alt="Profile"
-                      className="rounded-circle border border-3 border-primary shadow"
-                      style={{ width: '120px', height: '120px', objectFit: 'cover' }}
-                    />
+                    <DoctorAvatar key={profile?.user?.photo || 'initials'} name={`${profile?.user?.prenom || ''} ${profile?.user?.nom || ''}`} photo={profile?.user?.photo} />
                     <Button
                       size="sm"
                       variant="primary"
                       className="position-absolute bottom-0 end-0 rounded-circle border border-white shadow"
+                      aria-label="Update profile photo"
                       onClick={() => setShowPhotoModal(true)}
                       style={{ width: '35px', height: '35px', padding: 0 }}
                       disabled={isUploadingPhoto}
@@ -316,7 +318,7 @@ const DoctorProfile = () => {
             </Card.Body>
           </Card>
 
-          {userSliceError && <Alert variant="danger" dismissible>{userSliceError}</Alert>}
+          {userSliceError && <Alert variant="danger" dismissible>{userSliceError}{isEditing && <Button variant="outline-danger" disabled={isSavingProfile} onClick={() => { setIsEditing(false); setEmailPassword(''); dispatch(fetchUserProfile()); }}>Reload profile and discard draft</Button>}</Alert>}
 
           <Card className="shadow border-0 rounded-4">
             <Card.Body>
@@ -326,44 +328,51 @@ const DoctorProfile = () => {
                   <Form onSubmit={handleSaveProfile}>
                     {/* Personal Info Fields */}
                     <Row>
-                      <Col md={6}><Form.Group className="mb-3">
+                      <Col md={6}><Form.Group className="mb-3" controlId="doctor-profile-prenom">
                         <Form.Label>First Name</Form.Label>
                         <Form.Control type="text" name="prenom" value={formData.prenom} onChange={handleChange} disabled={!isEditing || isSavingProfile} isInvalid={!!errors.prenom} />
                         <Form.Control.Feedback type="invalid">{errors.prenom}</Form.Control.Feedback>
                       </Form.Group></Col>
-                      <Col md={6}><Form.Group className="mb-3">
+                      <Col md={6}><Form.Group className="mb-3" controlId="doctor-profile-nom">
                         <Form.Label>Last Name</Form.Label>
                         <Form.Control type="text" name="nom" value={formData.nom} onChange={handleChange} disabled={!isEditing || isSavingProfile} isInvalid={!!errors.nom} />
                         <Form.Control.Feedback type="invalid">{errors.nom}</Form.Control.Feedback>
                       </Form.Group></Col>
                     </Row>
                     <Row>
-                      <Col md={6}><Form.Group className="mb-3">
+                      <Col md={6}><Form.Group className="mb-3" controlId="doctor-profile-email">
                         <Form.Label>Email</Form.Label>
                         <Form.Control type="email" name="email" value={formData.email} onChange={handleChange} disabled={!isEditing || isSavingProfile} isInvalid={!!errors.email} />
                         <Form.Control.Feedback type="invalid">{errors.email}</Form.Control.Feedback>
+                      {isEditing && formData.email !== profile?.user?.email && (
+                        <Form.Group className="mt-3" controlId="email-change-password">
+                          <Form.Label>Current password to change email</Form.Label>
+                          <Form.Control type="password" autoComplete="current-password" value={emailPassword} onChange={event => setEmailPassword(event.target.value)} required />
+                          <Form.Text>Verify your new address before using your account again. Signed in with a provider? Sign out and use Forgot your password to set one first.</Form.Text>
+                        </Form.Group>
+                      )}
                       </Form.Group></Col>
-                      <Col md={6}><Form.Group className="mb-3">
+                      <Col md={6}><Form.Group className="mb-3" controlId="doctor-profile-telephone">
                         <Form.Label>Phone Number</Form.Label>
                         <Form.Control type="tel" name="telephone" value={formData.telephone || ''} onChange={handleChange} disabled={!isEditing || isSavingProfile} isInvalid={!!errors.telephone} />
                         <Form.Control.Feedback type="invalid">{errors.telephone}</Form.Control.Feedback>
                       </Form.Group></Col>
                     </Row>
                      <Row>
-                      <Col md={6}><Form.Group className="mb-3">
+                      <Col md={6}><Form.Group className="mb-3" controlId="doctor-profile-sexe">
                         <Form.Label>Gender</Form.Label>
                         <Form.Select name="sexe" value={formData.sexe || ''} onChange={handleChange} disabled={!isEditing || isSavingProfile} isInvalid={!!errors.sexe}>
                           <option value="">Select...</option><option value="homme">Male</option><option value="femme">Female</option>
                         </Form.Select>
                         <Form.Control.Feedback type="invalid">{errors.sexe}</Form.Control.Feedback>
                       </Form.Group></Col>
-                      <Col md={6}><Form.Group className="mb-3">
+                      <Col md={6}><Form.Group className="mb-3" controlId="doctor-profile-date_de_naissance">
                         <Form.Label>Date of Birth</Form.Label>
                         <Form.Control type="date" name="date_de_naissance" value={formData.date_de_naissance || ''} onChange={handleChange} disabled={!isEditing || isSavingProfile} isInvalid={!!errors.date_de_naissance} />
                         <Form.Control.Feedback type="invalid">{errors.date_de_naissance}</Form.Control.Feedback>
                       </Form.Group></Col>
                     </Row>
-                    <Form.Group className="mb-3">
+                    <Form.Group className="mb-3" controlId="doctor-profile-adresse">
                       <Form.Label>Address</Form.Label>
                       <Form.Control as="textarea" rows={2} name="adresse" value={formData.adresse || ''} onChange={handleChange} disabled={!isEditing || isSavingProfile} isInvalid={!!errors.adresse} />
                       <Form.Control.Feedback type="invalid">{errors.adresse}</Form.Control.Feedback>
@@ -371,7 +380,7 @@ const DoctorProfile = () => {
 
                     {/* Professional Info Fields */}
                     <h5 className="mt-4 mb-3">Professional Details</h5>
-                     <Form.Group className="mb-3">
+                     <Form.Group className="mb-3" controlId="doctor-profile-speciality_id">
                         <Form.Label>Medical Speciality</Form.Label>
                         <Form.Select name="speciality_id" value={formData.speciality_id || ''} onChange={handleChange} disabled={!isEditing || isSavingProfile || isLoadingSpecialities} isInvalid={!!errors.speciality_id}>
                           <option value="">{isLoadingSpecialities ? "Loading..." : "Select Speciality..."}</option>
@@ -379,7 +388,7 @@ const DoctorProfile = () => {
                         </Form.Select>
                         <Form.Control.Feedback type="invalid">{errors.speciality_id}</Form.Control.Feedback>
                       </Form.Group>
-                    <Form.Group className="mb-3">
+                    <Form.Group className="mb-3" controlId="doctor-profile-description">
                       <Form.Label>Professional Description</Form.Label>
                       <Form.Control as="textarea" rows={3} name="description" value={formData.description || ''} onChange={handleChange} disabled={!isEditing || isSavingProfile} isInvalid={!!errors.description} placeholder="Tell patients about your experience..." />
                       <Form.Control.Feedback type="invalid">{errors.description}</Form.Control.Feedback>
@@ -412,7 +421,7 @@ const DoctorProfile = () => {
                   <Form onSubmit={handleDocumentUpload} className="mb-4 p-3 border rounded bg-light">
                     <h5 className="mb-3">Upload New Document</h5>
                     <Row>
-                      <Col md={5}><Form.Group className="mb-3 mb-md-0">
+                      <Col md={5}><Form.Group className="mb-3 mb-md-0" controlId="doctor-profile-documentType">
                         <Form.Label>Document Type</Form.Label>
                         <Form.Select name="documentType" value={documentType} onChange={(e) => setDocumentType(e.target.value)} disabled={isUploadingDocument}>
                           <option value="licence">License</option><option value="cni">ID Card (CNI)</option><option value="diplome">Diploma</option><option value="autre">Other</option>
@@ -459,7 +468,7 @@ const DoctorProfile = () => {
                     <Col md={4}><Card className="h-100 text-center shadow-sm hover-lift rounded-3">
                       <Card.Body><i className="fas fa-clock fa-3x text-primary mb-3"></i><h5>Update Schedule</h5>
                       <p className="text-muted small">Manage your working hours and availability.</p>
-                      <Button variant="outline-primary" onClick={() => navigate('/schedule')}>Manage Schedule</Button></Card.Body>
+                      <Button variant="outline-primary" onClick={() => navigate('/doctor/availability')}>Manage Schedule</Button></Card.Body>
                     </Card></Col>
                     <Col md={4}><Card className="h-100 text-center shadow-sm hover-lift rounded-3">
                       <Card.Body><i className="fas fa-calendar-times fa-3x text-warning mb-3"></i><h5>Manage Leaves</h5>
@@ -484,17 +493,17 @@ const DoctorProfile = () => {
         <Modal.Header closeButton><Modal.Title>Change Password</Modal.Title></Modal.Header>
         <Form onSubmit={handlePasswordUpdate}>
           <Modal.Body>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="doctor-profile-current_password">
               <Form.Label>Current Password</Form.Label>
               <Form.Control type="password" name="current_password" value={passwordData.current_password} onChange={handlePasswordChange} isInvalid={!!passwordErrors.current_password} required />
               <Form.Control.Feedback type="invalid">{passwordErrors.current_password}</Form.Control.Feedback>
             </Form.Group>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="doctor-profile-password">
               <Form.Label>New Password</Form.Label>
               <Form.Control type="password" name="password" value={passwordData.password} onChange={handlePasswordChange} isInvalid={!!passwordErrors.password} minLength="8" required />
               <Form.Control.Feedback type="invalid">{passwordErrors.password}</Form.Control.Feedback>
             </Form.Group>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="doctor-profile-password_confirmation">
               <Form.Label>Confirm New Password</Form.Label>
               <Form.Control type="password" name="password_confirmation" value={passwordData.password_confirmation} onChange={handlePasswordChange} isInvalid={!!passwordErrors.password_confirmation} required />
               <Form.Control.Feedback type="invalid">{passwordErrors.password_confirmation}</Form.Control.Feedback>
@@ -514,10 +523,11 @@ const DoctorProfile = () => {
         <Modal.Header closeButton><Modal.Title>Update Profile Photo</Modal.Title></Modal.Header>
         <Form onSubmit={handlePhotoUpload}>
           <Modal.Body>
-            <Form.Group>
+            {userSliceError && <Alert variant="danger">{userSliceError}</Alert>}
+            <Form.Group controlId="profile-photo-file">
               <Form.Label>Choose a new photo</Form.Label>
-              <Form.Control type="file" accept="image/*" onChange={(e) => setPhotoFile(e.target.files[0])} required />
-              <Form.Text className="text-muted">Max file size: 5MB. Formats: JPG, PNG, GIF.</Form.Text>
+              <Form.Control type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => setPhotoFile(e.target.files[0])} required />
+              <Form.Text className="text-muted">Max file size: 5MB. Formats: JPG, PNG, WebP.</Form.Text>
             </Form.Group>
           </Modal.Body>
           <Modal.Footer>

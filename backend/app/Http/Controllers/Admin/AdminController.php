@@ -3,15 +3,13 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\User;
 use App\Models\Avis;
-use App\Models\Rendezvous;
 use App\Models\Payment;
-use App\Models\UserSubscription;
-use Illuminate\Http\Request;
+use App\Models\Rendezvous;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
-use Illuminate\Support\Facades\Auth;
 
 class AdminController extends Controller
 {
@@ -26,10 +24,10 @@ class AdminController extends Controller
             'total_revenue' => Payment::where('status', 'completed')->sum('amount'),
             'recent_registrations' => User::orderBy('created_at', 'desc')->limit(5)->get(),
             'pending_doctor_verifications' => User::where('role', 'medecin')
-                ->whereHas('doctor', function($query) {
+                ->whereHas('doctor', function ($query) {
                     $query->where('is_verified', false);
                 })
-                ->count()
+                ->count(),
         ];
 
         return response()->json(['data' => $stats]);
@@ -45,56 +43,29 @@ class AdminController extends Controller
 
         if ($request->has('search')) {
             $search = $request->search;
-            $query->where(function($q) use ($search) {
+            $query->where(function ($q) use ($search) {
                 $q->where('nom', 'like', "%{$search}%")
-                  ->orWhere('prenom', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%");
+                    ->orWhere('prenom', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%");
             });
         }
 
         $users = $query->paginate(15);
+
         return response()->json($users);
     }
 
     public function updateUserStatus(Request $request, User $user): JsonResponse
     {
         $request->validate([
-            'status' => 'required|in:actif,inactif,en_attente'
+            'status' => 'required|in:actif,inactif,en_attente',
         ]);
 
         $user->update(['status' => $request->status]);
 
         return response()->json([
             'message' => 'Statut utilisateur mis à jour',
-            'user' => $user
-        ]);
-    }
-
-    public function getPendingReviews(): JsonResponse
-    {
-        $reviews = Avis::with(['patient', 'doctor', 'appointment'])
-            ->where('status', 'pending')
-            ->paginate(15);
-
-        return response()->json($reviews);
-    }
-
-    public function moderateReview(Request $request, Avis $review): JsonResponse
-    {
-        $request->validate([
-            'action' => 'required|in:approve,reject',
-            'reason' => 'nullable|string|max:500'
-        ]);
-
-        $review->update([
-            'status' => $request->action === 'approve' ? 'approved' : 'rejected',
-            'moderated_at' => now(),
-            'moderated_by' => Auth::id()
-        ]);
-
-        return response()->json([
-            'message' => 'Avis modéré avec succès',
-            'review' => $review->load(['patient', 'doctor'])
+            'user' => $user,
         ]);
     }
 
@@ -106,10 +77,10 @@ class AdminController extends Controller
         if ($format === 'csv') {
             $headers = [
                 'Content-Type' => 'text/csv',
-                'Content-Disposition' => 'attachment; filename="users_export.csv"'
+                'Content-Disposition' => 'attachment; filename="users_export.csv"',
             ];
 
-            $callback = function() use ($users) {
+            $callback = function () use ($users) {
                 $file = fopen('php://output', 'w');
                 fputcsv($file, ['ID', 'Nom', 'Prénom', 'Email', 'Rôle', 'Statut', 'Date d\'inscription']);
 
@@ -121,7 +92,7 @@ class AdminController extends Controller
                         $user->email,
                         $user->role,
                         $user->status,
-                        $user->created_at->format('Y-m-d H:i:s')
+                        $user->created_at->format('Y-m-d H:i:s'),
                     ]);
                 }
                 fclose($file);
@@ -134,7 +105,7 @@ class AdminController extends Controller
         // For Excel format, return JSON response indicating export is being processed or that it's not supported
         return response()->json([
             'message' => 'Excel export is not yet implemented. Please use CSV format.',
-            'requested_format' => $format
+            'requested_format' => $format,
         ], 501); // 501 Not Implemented
     }
 }

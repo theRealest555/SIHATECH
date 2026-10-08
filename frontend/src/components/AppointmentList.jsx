@@ -1,4 +1,4 @@
-import React from 'react';
+import PropTypes from 'prop-types';
 import { ListGroup, Form } from 'react-bootstrap';
 
 function AppointmentList({ appointments, onStatusUpdate }) {
@@ -43,5 +43,7 @@ function AppointmentList({ appointments, onStatusUpdate }) {
     </div>
   );
 }
+
+AppointmentList.propTypes = { appointments: PropTypes.arrayOf(PropTypes.shape({ id: PropTypes.oneOfType([PropTypes.number, PropTypes.string]), date_heure: PropTypes.string, statut: PropTypes.string })), onStatusUpdate: PropTypes.func.isRequired };
 
 export default AppointmentList;

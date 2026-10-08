@@ -1,172 +1,57 @@
-// src/pages/admin/SubscriptionPlanManagementPage.jsx
-import React, { useState, useEffect, useCallback } from 'react';
-// import { getAllSubscriptionPlans, createSubscriptionPlan, updateSubscriptionPlan, deleteSubscriptionPlan } from '../../services/adminService';
-import { FaPlus, FaEdit, FaTrash, FaSpinner, FaCreditCard } from 'react-icons/fa';
-
-const SubscriptionPlanManagementPage = () => {
-    const [plans, setPlans] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-    const [isModalOpen, setIsModalOpen] = useState(false);
-    const [currentPlan, setCurrentPlan] = useState({ id: null, name: '', price: '', duration_months: '', features: '' });
-    const [modalMode, setModalMode] = useState('add');
-
-    const mockPlans = [
-        { id: 1, name: 'Basic Doctor', price: '29.99', duration_months: 1, features: 'Profile Listing, Basic Scheduling' },
-        { id: 2, name: 'Pro Doctor', price: '79.99', duration_months: 1, features: 'Profile Listing, Advanced Scheduling, Analytics, Priority Support' },
-        { id: 3, name: 'Clinic Basic', price: '149.99', duration_months: 1, features: 'Up to 5 Doctors, Clinic Profile, Shared Scheduling' },
-    ];
-
-    const fetchPlans = useCallback(async () => {
-        setLoading(true);
-        // try {
-        //     const response = await getAllSubscriptionPlans();
-        //     setPlans(response.data.plans || response.data || []);
-        //     setError(null);
-        // } catch (err) {
-        //     setError(err.message || 'Failed to fetch subscription plans.');
-        //     setPlans([]);
-        // } finally {
-        //     setLoading(false);
-        // }
-         setTimeout(() => { // Mock API
-            setPlans(mockPlans);
-            setLoading(false);
-        }, 500);
-    }, []);
-
+import { useEffect, useState } from 'react';
+import { getAdminPlans, createAdminPlan, updateAdminPlan } from '../../services/adminService';
+import { apiError } from '../../utils/apiErrors';
+const blank = { name: '', description: '', price: '', billing_cycle: 'monthly', features: '', is_active: false, stripe_price_id: '' };
+const buttonClass = 'border border-blue-700 text-blue-800 rounded px-3 py-2 disabled:opacity-50';
+const cycles = { monthly: 'Monthly', 'semi-annual': 'Every six months', yearly: 'Yearly' };
+export default function SubscriptionPlanManagementPage() {
+    const [page, setPage] = useState(1); const [revision, setRevision] = useState(0); const [data, setData] = useState(null); const [loading, setLoading] = useState(true);
+    const [editor, setEditor] = useState(null); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [saveError, setSaveError] = useState(''); const [message, setMessage] = useState('');
     useEffect(() => {
-        fetchPlans();
-    }, [fetchPlans]);
-
-    const openModal = (mode, plan = null) => {
-        setModalMode(mode);
-        setCurrentPlan(plan ? { ...plan, features: Array.isArray(plan.features) ? plan.features.join(', ') : plan.features } : { id: null, name: '', price: '', duration_months: '', features: '' });
-        setIsModalOpen(true);
-        setError(null);
-    };
-    const closeModal = () => setIsModalOpen(false);
-
-    const handleInputChange = (e) => {
-        const { name, value } = e.target;
-        setCurrentPlan(prev => ({ ...prev, [name]: value }));
-    };
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        setLoading(true);
-        const planDataToSubmit = {
-            ...currentPlan,
-            features: currentPlan.features.split(',').map(f => f.trim()).filter(f => f) // Convert comma-separated string to array
-        };
-        // try {
-        //     if (modalMode === 'edit' && planDataToSubmit.id) {
-        //         await updateSubscriptionPlan(planDataToSubmit.id, planDataToSubmit);
-        //     } else {
-        //         await createSubscriptionPlan(planDataToSubmit);
-        //     }
-        //     fetchPlans();
-        //     closeModal();
-        // } catch (err) {
-        //     setError(err.response?.data?.message || `Failed to ${modalMode} plan.`);
-        // } finally {
-        //     setLoading(false);
-        // }
-        alert(`Mock ${modalMode} plan: ${planDataToSubmit.name}`);
-        setLoading(false);
-        if(modalMode === 'add') setPlans(prev => [...prev, {...planDataToSubmit, id: Date.now()}]);
-        else setPlans(prev => prev.map(s => s.id === planDataToSubmit.id ? planDataToSubmit : s));
-        closeModal();
-    };
-
-    const handleDelete = async (id) => {
-        if (window.confirm('Are you sure you want to delete this plan?')) {
-            setLoading(true);
-            // try {
-            //     await deleteSubscriptionPlan(id);
-            //     fetchPlans();
-            // } catch (err) {
-            //     setError(err.response?.data?.message || 'Failed to delete plan.');
-            // } finally {
-            //     setLoading(false);
-            // }
-            alert(`Mock delete plan ID: ${id}`);
-            setPlans(prev => prev.filter(s => s.id !== id));
-            setLoading(false);
-        }
-    };
-
-    if (loading && plans.length === 0) return <div className="p-6 text-center flex justify-center items-center min-h-[200px]"><FaSpinner className="animate-spin h-8 w-8 text-indigo-600 mr-3" />Loading plans...</div>;
-
-    return (
-        <div className="p-4 md:p-8 bg-gray-100 min-h-screen">
-            <div className="flex justify-between items-center mb-8">
-                <h1 className="text-3xl font-bold text-gray-800 flex items-center"><FaCreditCard className="mr-3 text-indigo-600"/>Subscription Plan Management</h1>
-                <button onClick={() => openModal('add')} className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md flex items-center">
-                    <FaPlus className="mr-2"/> Add Plan
-                </button>
-            </div>
-            {error && <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md shadow">{error}</div>}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {plans.length > 0 ? plans.map(plan => (
-                    <div key={plan.id} className="bg-white shadow-xl rounded-lg p-6 flex flex-col justify-between hover:shadow-2xl transition-shadow">
-                        <div>
-                            <h3 className="text-xl font-semibold text-indigo-700 mb-2">{plan.name}</h3>
-                            <p className="text-3xl font-bold text-gray-800 mb-1">${plan.price} <span className="text-sm font-normal text-gray-500">/ {plan.duration_months} month(s)</span></p>
-                            <p className="text-sm text-gray-600 mb-3">Duration: {plan.duration_months} month(s)</p>
-                            <h4 className="text-sm font-semibold text-gray-700 mb-1">Features:</h4>
-                            <ul className="list-disc list-inside text-sm text-gray-600 space-y-1 mb-4">
-                                {(Array.isArray(plan.features) ? plan.features : plan.features.split(',')).map((feature, index) => (
-                                    <li key={index}>{feature.trim()}</li>
-                                ))}
-                            </ul>
-                        </div>
-                        <div className="mt-auto flex justify-end space-x-2 pt-4 border-t border-gray-200">
-                            <button onClick={() => openModal('edit', plan)} className="text-indigo-600 hover:text-indigo-900 p-2 rounded-md hover:bg-indigo-100" title="Edit"><FaEdit size={18}/></button>
-                            <button onClick={() => handleDelete(plan.id)} className="text-red-600 hover:text-red-900 p-2 rounded-md hover:bg-red-100" title="Delete"><FaTrash size={16}/></button>
-                        </div>
-                    </div>
-                )) : (
-                     <p className="col-span-full text-center text-gray-500 py-10">No subscription plans found.</p>
-                )}
-            </div>
-
-             {isModalOpen && (
-                <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex justify-center items-center z-50">
-                    <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-lg mx-auto">
-                        <h2 className="text-2xl font-semibold text-gray-800 mb-6">{modalMode === 'edit' ? 'Edit' : 'Add New'} Subscription Plan</h2>
-                        <form onSubmit={handleSubmit} className="space-y-4">
-                            <div>
-                                <label htmlFor="name" className="block text-sm font-medium text-gray-700">Plan Name</label>
-                                <input type="text" name="name" id="name" value={currentPlan.name} onChange={handleInputChange} required className="mt-1 w-full p-2 border border-gray-300 rounded-md shadow-sm"/>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label htmlFor="price" className="block text-sm font-medium text-gray-700">Price (USD)</label>
-                                    <input type="number" name="price" id="price" step="0.01" value={currentPlan.price} onChange={handleInputChange} required className="mt-1 w-full p-2 border border-gray-300 rounded-md shadow-sm"/>
-                                </div>
-                                <div>
-                                    <label htmlFor="duration_months" className="block text-sm font-medium text-gray-700">Duration (Months)</label>
-                                    <input type="number" name="duration_months" id="duration_months" min="1" value={currentPlan.duration_months} onChange={handleInputChange} required className="mt-1 w-full p-2 border border-gray-300 rounded-md shadow-sm"/>
-                                </div>
-                            </div>
-                            <div>
-                                <label htmlFor="features" className="block text-sm font-medium text-gray-700">Features (comma-separated)</label>
-                                <textarea name="features" id="features" value={currentPlan.features} onChange={handleInputChange} rows="3" className="mt-1 w-full p-2 border border-gray-300 rounded-md shadow-sm" placeholder="e.g., Feature 1, Feature 2, Another Feature"></textarea>
-                            </div>
-                             {error && <p className="text-red-500 text-sm">{error}</p>}
-                            <div className="flex justify-end space-x-3 pt-4">
-                                <button type="button" onClick={closeModal} className="bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-2 px-4 rounded-lg">Cancel</button>
-                                <button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg flex items-center justify-center min-w-[100px]">
-                                    {loading ? <FaSpinner className="animate-spin"/> : (modalMode === 'edit' ? 'Save Plan' : 'Add Plan')}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-};
-export default SubscriptionPlanManagementPage;
+        const controller = new AbortController(); setLoading(true); setData(null); setError('');
+        getAdminPlans({ page, per_page: 25 }, { signal: controller.signal }).then(response => { if (!controller.signal.aborted) setData(response.data); })
+            .catch(err => { if (!controller.signal.aborted) setError(apiError(err, 'Could not load plans.')); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+        return () => controller.abort();
+    }, [page, revision]);
+    function edit(plan = null, clone = false) {
+        setSaveError(''); setMessage('');
+        setEditor(plan ? { ...plan, name: clone ? `${plan.name} (new version)` : plan.name, features: plan.features.join('\n'), stripe_price_id: clone ? '' : plan.stripe_price_id || '', ...(clone ? { id: null, is_active: false, subscriptions_count: 0 } : {}) } : { ...blank });
+    }
+    async function save(event) {
+        event.preventDefault(); setBusy(true); setSaveError('');
+        const body = { name: editor.name.trim(), description: editor.description.trim() || null, price: editor.price, billing_cycle: editor.billing_cycle, features: editor.features.split('\n').map(value => value.trim()).filter(Boolean), is_active: editor.is_active, stripe_price_id: editor.stripe_price_id.trim() || null, ...(editor.id ? { expected_version: editor.version } : {}) };
+        try {
+            if (editor.id) await updateAdminPlan(editor.id, body); else await createAdminPlan(body);
+            setEditor(null); setMessage('Plan saved.'); setRevision(value => value + 1);
+        } catch (err) { setSaveError(apiError(err, 'Could not save this plan.')); }
+        finally { setBusy(false); }
+    }
+    const billingLocked = Boolean(editor?.id && editor.subscriptions_count > 0);
+    const change = event => setEditor(current => ({ ...current, [event.target.name]: event.target.type === 'checkbox' ? event.target.checked : event.target.value }));
+    return <main className="max-w-5xl mx-auto p-6 space-y-5"><h1 className="text-3xl font-bold">Subscription plans</h1>
+        <p>Prices are in MAD. Plans with subscription history keep their price, billing cycle and Stripe price. Create a new version for new pricing.</p>
+        <div className="flex gap-4"><button className={buttonClass} disabled={busy} onClick={() => edit()}>Create draft plan</button><button className={buttonClass} disabled={loading || busy} onClick={() => setRevision(value => value + 1)}>Refresh plans</button></div>
+        {message && <p role="status">{message}</p>}
+        {editor && <section className="border rounded p-4 space-y-3" aria-label="Plan editor"><h2 className="text-xl">{editor.id ? 'Edit plan' : 'New plan'}</h2>
+            {billingLocked && <p>Billing fields are locked because this plan has subscription history.</p>}
+            {editor.features_need_review && <p>Stored features need review. Enter a clear feature list before saving.</p>}
+            <form onSubmit={save} className="space-y-3">
+                <label className="block">Plan name <input name="name" value={editor.name} required maxLength={100} disabled={busy} onChange={change} className="border rounded p-2 w-full" /></label>
+                <label className="block">Description <textarea name="description" value={editor.description} maxLength={2000} disabled={busy} onChange={change} className="border rounded p-2 w-full" /></label>
+                <label className="block">Price (MAD) <input name="price" type="number" min="0.01" max="999999.99" step="0.01" required value={editor.price} disabled={busy || billingLocked} onChange={change} className="border rounded p-2" /></label>
+                <label className="block">Billing cycle <select name="billing_cycle" value={editor.billing_cycle} disabled={busy || billingLocked} onChange={change} className="border rounded p-2">{Object.entries(cycles).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+                <label className="block">Features (one per line) <textarea name="features" value={editor.features} disabled={busy} onChange={change} className="border rounded p-2 w-full" /></label>
+                <label className="block">Stripe price ID <input name="stripe_price_id" value={editor.stripe_price_id} maxLength={255} disabled={busy || billingLocked} onChange={change} className="border rounded p-2 w-full" /></label>
+                <p>Allowing new subscriptions requires an active recurring Stripe price with the same MAD amount and cycle. Saving a draft can leave this field blank.</p>
+                <label className="block"><input name="is_active" type="checkbox" checked={editor.is_active} disabled={busy} onChange={change} /> Allow new subscriptions</label>
+                <p>Turning this off removes the plan from new purchases. Existing subscriptions continue.</p>
+                {saveError && <p role="alert">{saveError}</p>}
+                <div className="flex gap-4"><button disabled={busy} className="bg-blue-700 text-white rounded px-4 py-2">{busy ? 'Saving…' : 'Save plan'}</button><button type="button" className={buttonClass} disabled={busy} onClick={() => setEditor(null)}>Cancel edit</button></div>
+            </form>
+        </section>}
+        {loading && <p role="status">Loading plans…</p>}{error && <p role="alert">{error} <button className={buttonClass} onClick={() => setRevision(value => value + 1)}>Retry</button></p>}
+        {data && <><p>{data.meta.total} plans</p>{!data.data.length && <p>No subscription plans recorded.</p>}{data.data.map(plan => <article key={plan.id} className="border rounded p-4 space-y-2"><h2 className="text-lg font-semibold">{plan.name} · Plan #{plan.id}</h2><p>{plan.price} MAD · {cycles[plan.billing_cycle]} · {plan.is_active ? 'Available to new subscribers' : 'Not available to new subscribers'}</p><p>{plan.subscriptions_count} subscription records</p><p>{plan.description}</p><ul>{plan.features.map((feature, index) => <li key={index}>{feature}</li>)}</ul>
+            <div className="flex gap-4"><button className={buttonClass} disabled={busy} onClick={() => edit(plan)}>Edit plan #{plan.id}</button><button className={buttonClass} disabled={busy} onClick={() => edit(plan, true)}>New version of plan #{plan.id}</button></div>
+        </article>)}<nav aria-label="Plan pages" className="flex gap-4"><button className={buttonClass} disabled={busy || data.meta.current_page <= 1} onClick={() => setPage(value => value - 1)}>Previous page</button><span>Page {data.meta.current_page} of {data.meta.last_page}</span><button className={buttonClass} disabled={busy || data.meta.current_page >= data.meta.last_page} onClick={() => setPage(value => value + 1)}>Next page</button></nav></>}
+    </main>;
+}

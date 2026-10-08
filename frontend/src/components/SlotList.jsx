@@ -1,4 +1,4 @@
-import React from 'react';
+import PropTypes from 'prop-types';
 import { ListGroup, Button, Spinner } from 'react-bootstrap';
 
 function SlotList({ slots, onBook, loading }) {
@@ -30,5 +30,7 @@ function SlotList({ slots, onBook, loading }) {
     </div>
   );
 }
+
+SlotList.propTypes = { slots: PropTypes.arrayOf(PropTypes.string), onBook: PropTypes.func.isRequired, loading: PropTypes.bool };
 
 export default SlotList;

@@ -2,22 +2,23 @@
 
 namespace Tests\Feature\Patient;
 
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\TestCase;
-use App\Models\User;
-use App\Models\Patient;
 use App\Models\Doctor;
-use Laravel\Sanctum\Sanctum;
-use Illuminate\Support\Facades\Storage;
+use App\Models\Patient;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\DB; // Added for tearDown
+use Illuminate\Support\Facades\Storage;
+use Laravel\Sanctum\Sanctum;
+use Tests\TestCase; // Added for tearDown
 
 class ProfileControllerTest extends TestCase
 {
     use RefreshDatabase;
 
     protected User $patientUser;
+
     protected Patient $patient;
 
     protected function setUp(): void
@@ -56,6 +57,7 @@ class ProfileControllerTest extends TestCase
         $updateData = [
             'nom' => 'UpdatedLastName',
             'prenom' => 'UpdatedFirstName',
+            'current_password' => 'password',
             'email' => 'updated.patient@example.com',
             'telephone' => '0611223345',
             'adresse' => '123 Updated St',
@@ -64,6 +66,7 @@ class ProfileControllerTest extends TestCase
             'medecin_favori_id' => $doctor->id,
         ];
 
+        $updateData['expected_profile_revision'] = $this->getJson('/api/patient/profile')->json('profile_revision');
         $response = $this->putJson('/api/patient/profile', $updateData);
 
         $response->assertStatus(200)
@@ -81,7 +84,7 @@ class ProfileControllerTest extends TestCase
         $response = $this->putJson('/api/patient/profile', ['email' => 'not-an-email']);
 
         $response->assertStatus(422)
-                 ->assertJsonValidationErrors(['email']);
+            ->assertJsonValidationErrors(['email']);
     }
 
     public function test_patient_can_update_their_password()
@@ -116,9 +119,8 @@ class ProfileControllerTest extends TestCase
         $response = $this->putJson('/api/patient/profile/password', $passwordData);
 
         $response->assertStatus(422)
-                 ->assertJsonPath('message', 'The current password is incorrect.');
+            ->assertJsonPath('message', 'The current password is incorrect.');
     }
-
 
     public function test_patient_can_update_profile_photo()
     {

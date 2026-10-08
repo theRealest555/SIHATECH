@@ -1,146 +1,113 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
-import { getPendingVerificationDoctors, verifyDoctor, rejectDoctorDocument } from '../../services/adminService';
-import { FaCheckCircle, FaTimesCircle, FaEye, FaSpinner, FaFileAlt } from 'react-icons/fa';
-
-const DoctorVerificationPage = () => {
-    const [doctors, setDoctors] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-    const [selectedDoctor, setSelectedDoctor] = useState(null);
-    const [rejectionReason, setRejectionReason] = useState('');
-
-    const fetchPendingDoctors = useCallback(async () => {
-        setLoading(true);
-        try {
-            const response = await getPendingVerificationDoctors();
-            // Assuming response.data or response.data.doctors is the array
-            setDoctors(response.data.doctors || response.data || []);
-            setError(null);
-        } catch (err) {
-            console.error("Error fetching pending doctors:", err);
-            setError(err.response?.data?.message || err.message || 'Failed to fetch doctors for verification.');
-            setDoctors([]);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
+import { useCallback, useEffect, useState } from 'react';
+import { approveDoctorDocument, downloadAdminDocument, getVerificationDoctor, getVerificationDoctors, rejectDoctorDocument, revokeDoctorVerification, verifyDoctor } from '../../services/adminService';
+import { apiError } from '../../utils/apiErrors';
+const types = { licence: 'Medical licence', cni: 'Identity document', diplome: 'Diploma', autre: 'Other' };
+const statuses = { pending: 'Awaiting review', approved: 'Approved', rejected: 'Rejected' };
+export default function DoctorVerificationPage() {
+    const [filters, setFilters] = useState({ status: 'pending', search: '', page: 1 });
+    const [search, setSearch] = useState(''); const [doctors, setDoctors] = useState([]); const [meta, setMeta] = useState({});
+    const [selected, setSelected] = useState(null); const [detail, setDetail] = useState(null);
+    const [loading, setLoading] = useState(true); const [detailLoading, setDetailLoading] = useState(false);
+    const [error, setError] = useState(''); const [message, setMessage] = useState(''); const [busy, setBusy] = useState(false);
+    const [action, setAction] = useState(null); const [reason, setReason] = useState('');
+    const loadList = useCallback(async (signal) => {
+        const response = await getVerificationDoctors(filters, { signal });
+        setDoctors(response.data.data); setMeta(response.data.meta);
+    }, [filters]);
+    const loadDetail = useCallback(async (signal) => {
+        if (!selected) return;
+        const response = await getVerificationDoctor(selected, { signal }); setDetail(response.data);
+    }, [selected]);
     useEffect(() => {
-        fetchPendingDoctors();
-    }, [fetchPendingDoctors]);
-
-    const handleApprove = async (doctorId) => {
-        if (window.confirm(`Are you sure you want to approve Dr. ID ${doctorId}?`)) {
-            try {
-                await verifyDoctor(doctorId);
-                alert('Doctor approved successfully!');
-                fetchPendingDoctors(); // Refresh list
-            } catch (err) {
-                alert(`Failed to approve doctor: ${err.response?.data?.message || err.message}`);
-            }
+        const controller = new AbortController(); setLoading(true); setError('');
+        loadList(controller.signal).catch(err => { if (!controller.signal.aborted) setError(apiError(err, 'Could not load doctor applications.')); })
+            .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+        return () => controller.abort();
+    }, [loadList]);
+    useEffect(() => {
+        const controller = new AbortController(); setDetail(null); setAction(null); setReason('');
+        if (selected) {
+            setDetailLoading(true);
+            loadDetail(controller.signal).catch(err => { if (!controller.signal.aborted) setError(apiError(err, 'Could not load doctor credentials.')); })
+                .finally(() => { if (!controller.signal.aborted) setDetailLoading(false); });
         }
-    };
-
-    const handleReject = async (doctorId) => {
-        if (!rejectionReason.trim() && selectedDoctor?.id === doctorId) {
-            alert('Please provide a reason for rejection.');
-            return;
-        }
-        if (window.confirm(`Are you sure you want to reject Dr. ID ${doctorId}? Reason: ${rejectionReason}`)) {
-            try {
-                await rejectDoctorDocument(doctorId, { reason: rejectionReason }); // Backend might expect a reason
-                alert('Doctor rejected successfully!');
-                setSelectedDoctor(null);
-                setRejectionReason('');
-                fetchPendingDoctors(); // Refresh list
-            } catch (err) {
-                alert(`Failed to reject doctor: ${err.response?.data?.message || err.message}`);
-            }
-        }
-    };
-    
-    const viewDoctorDetails = (doctor) => {
-        // In a real app, this might open a modal with more comprehensive details
-        // or navigate to a specific doctor detail page for admins.
-        // For now, just logging to console or setting for a simple display area.
-        setSelectedDoctor(doctor);
-        setRejectionReason(''); // Clear reason when selecting new doctor
-        console.log("Viewing details for:", doctor);
-    };
-
-
-    if (loading) return <div className="p-6 text-center flex justify-center items-center min-h-[300px]"><FaSpinner className="animate-spin h-8 w-8 text-indigo-600 mr-3" />Loading doctors for verification...</div>;
-    if (error) return <div className="p-6 text-center text-red-500 bg-red-100 rounded-md shadow">Error: {error}</div>;
-
-    return (
-        <div className="p-4 md:p-8 bg-gray-100 min-h-screen">
-            <h1 className="text-3xl font-bold text-gray-800 mb-8">Doctor Verification</h1>
-
-            {doctors.length === 0 && !loading && (
-                <p className="text-center text-gray-600 bg-white p-6 rounded-lg shadow">No doctors are currently pending verification.</p>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {doctors.map(doctor => (
-                    <div key={doctor.id} className="bg-white shadow-xl rounded-lg p-6 hover:shadow-2xl transition-shadow duration-300">
-                        <div className="flex items-center mb-4">
-                            <img src={doctor.user?.profile_image_url || `https://ui-avatars.com/api/?name=${doctor.user?.first_name}+${doctor.user?.last_name}&background=random`} alt={`${doctor.user?.first_name} ${doctor.user?.last_name}`} className="h-16 w-16 rounded-full mr-4 object-cover" />
-                            <div>
-                                <h2 className="text-xl font-semibold text-gray-800">Dr. {doctor.user?.first_name} {doctor.user?.last_name}</h2>
-                                <p className="text-sm text-gray-600">{doctor.speciality?.name || 'Speciality not set'}</p>
-                                <p className="text-xs text-gray-500">User ID: {doctor.user_id}</p>
-                            </div>
+        return () => controller.abort();
+    }, [selected, loadDetail]);
+    async function refresh() {
+        setBusy(true); setError('');
+        try { await Promise.all([loadList(), loadDetail()]); } catch (err) { setError(apiError(err, 'Could not refresh applications.')); }
+        finally { setBusy(false); }
+    }
+    function selectAction(kind, document) { setAction({ kind, document }); setReason(''); setError(''); setMessage(''); }
+    async function decide(event) {
+        event.preventDefault(); setBusy(true); setError(''); setMessage('');
+        try {
+            if (action.kind === 'approve') await approveDoctorDocument(action.document.id, action.document.status);
+            if (action.kind === 'reject') await rejectDoctorDocument(action.document.id, reason.trim(), action.document.status);
+            if (action.kind === 'verify') await verifyDoctor(selected);
+            if (action.kind === 'revoke') await revokeDoctorVerification(selected, reason.trim());
+            setMessage('Decision saved.'); setAction(null); setReason('');
+            try { await Promise.all([loadList(), loadDetail()]); } catch { setError('Decision saved, but refreshing failed. Reload to see the latest state.'); }
+        } catch (err) {
+            setError(apiError(err, 'Could not save the decision.'));
+            // A conflict can mean another administrator already reviewed the credential.
+            if (err.response?.status === 409) { setAction(null); try { await Promise.all([loadList(), loadDetail()]); } catch { /* Keep the decision error visible. */ } }
+        } finally { setBusy(false); }
+    }
+    async function download(document) {
+        setBusy(true); setError('');
+        try {
+            const response = await downloadAdminDocument(document.id); const url = URL.createObjectURL(response.data);
+            const anchor = window.document.createElement('a'); anchor.href = url; anchor.download = document.original_name;
+            window.document.body.appendChild(anchor); anchor.click(); anchor.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (err) { setError(apiError(err, 'The private document could not be downloaded. It may no longer be available.')); }
+        finally { setBusy(false); }
+    }
+    const doctor = detail?.data;
+    const canVerify = doctor && !doctor.is_verified && !detail.meta.missing_document_types.length && doctor.user?.email_verified_at && doctor.user.status === 'actif' && doctor.speciality_id;
+    return <main className="max-w-6xl mx-auto p-6 space-y-6">
+        <h1 className="text-3xl font-bold">Doctor verification</h1>
+        <p>Review credentials before verifying a doctor. Rejecting a required credential can revoke verification. Existing appointments remain recorded.</p>
+        {error && <p role="alert" className="bg-red-50 text-red-800 p-4">{error}</p>}
+        {message && <p role="status" className="bg-green-50 text-green-800 p-4">{message}</p>}
+        <form onSubmit={event => { event.preventDefault(); setFilters({ ...filters, search: search.trim(), page: 1 }); }} className="flex flex-wrap gap-3 items-end">
+            <div><label htmlFor="application-status">Verification status</label><select id="application-status" className="block border rounded p-2" disabled={busy} value={filters.status} onChange={event => setFilters({ ...filters, status: event.target.value, page: 1 })}><option value="pending">Pending</option><option value="verified">Verified</option><option value="all">All doctors</option></select></div>
+            <div><label htmlFor="application-search">Name or email</label><input id="application-search" className="block border rounded p-2" maxLength={120} disabled={busy} value={search} onChange={event => setSearch(event.target.value)} /></div>
+            <button disabled={busy} type="submit">Search</button><button disabled={busy || loading} type="button" onClick={refresh}>Reload applications</button>
+        </form>
+        <div className="grid md:grid-cols-3 gap-6">
+            <section className="space-y-3"><h2 className="text-xl font-semibold">Doctors</h2>
+                {loading ? <p role="status">Loading applications…</p> : !doctors.length ? <p>No matching doctors.</p> : doctors.map(item => <article key={item.id} className="bg-white border rounded-xl p-4 space-y-2">
+                    <h3 className="font-semibold">Dr. {item.user?.prenom} {item.user?.nom}</h3><p>{item.speciality?.nom || 'Speciality missing'}</p><p>{item.is_verified ? 'Verified' : 'Pending verification'} · {item.pending_documents_count} documents awaiting review</p>
+                    <button disabled={busy} aria-pressed={selected === item.id} onClick={() => { setSelected(item.id); setMessage(''); }}>Review Dr. {item.user?.prenom} {item.user?.nom}</button>
+                </article>)}
+                {!loading && meta.total > 0 && <div className="flex flex-wrap gap-3"><button disabled={busy || meta.current_page <= 1} onClick={() => setFilters({ ...filters, page: filters.page - 1 })}>Previous</button><span>Page {meta.current_page} of {meta.last_page}</span><button disabled={busy || meta.current_page >= meta.last_page} onClick={() => setFilters({ ...filters, page: filters.page + 1 })}>Next</button></div>}
+            </section>
+            <section className="md:col-span-2 bg-white border rounded-xl p-6 space-y-4"><h2 className="text-xl font-semibold">Credential review</h2>
+                {detailLoading ? <p role="status">Loading credentials…</p> : !doctor ? <p>Select a doctor to review their documents.</p> : <>
+                    <h3 className="text-xl font-semibold">Dr. {doctor.user?.prenom} {doctor.user?.nom}</h3><p>{doctor.user?.email} · Account: {doctor.user?.status}</p>
+                    <p>Email: {doctor.user?.email_verified_at ? 'Verified' : 'Not verified'} · Doctor: {doctor.is_verified ? 'Verified' : 'Not verified'}</p>
+                    <p>Required credentials: {detail.meta.required_document_types.map(type => types[type] || type).join(', ')}.</p>
+                    {detail.meta.missing_document_types.length > 0 && <p>Missing approved files: {detail.meta.missing_document_types.map(type => types[type] || type).join(', ')}.</p>}
+                    <div className="flex gap-4">{doctor.is_verified ? <button disabled={busy} onClick={() => selectAction('revoke')}>Revoke verification</button> : <button disabled={busy || !canVerify} onClick={() => selectAction('verify')}>Verify doctor</button>}</div>
+                    {!doctor.documents.length && <p>No credentials uploaded.</p>}
+                    {doctor.documents.map(document => <article key={document.id} className="border-t pt-4 space-y-2">
+                        <h4 className="font-semibold break-all">{document.original_name}</h4><p>{types[document.type] || document.type} · {statuses[document.status] || document.status}</p>
+                        {document.rejection_reason && <p>Review feedback: {document.rejection_reason}</p>}
+                        {!document.file_available && <p className="text-red-800">File missing. Ask the doctor to upload it again.</p>}
+                        <div className="flex flex-wrap gap-4"><button disabled={busy || !document.file_available} onClick={() => download(document)}>Download {document.original_name}</button>
+                            {document.status !== 'approved' && <button disabled={busy || !document.file_available} onClick={() => selectAction('approve', document)}>Approve {document.original_name}</button>}
+                            {document.status !== 'rejected' && <button disabled={busy} onClick={() => selectAction('reject', document)}>Reject {document.original_name}</button>}
                         </div>
-                        
-                        <p className="text-sm text-gray-700 mb-1"><strong>Email:</strong> {doctor.user?.email}</p>
-                        <p className="text-sm text-gray-700 mb-1"><strong>Phone:</strong> {doctor.phone_number || 'N/A'}</p>
-                        <p className="text-sm text-gray-700 mb-3"><strong>Experience:</strong> {doctor.experience_years || 'N/A'} years</p>
-                        
-                        <div className="mb-4">
-                            <h4 className="text-md font-semibold text-gray-700 mb-1">Uploaded Documents:</h4>
-                            {doctor.documents && doctor.documents.length > 0 ? (
-                                <ul className="list-disc list-inside pl-1 text-sm">
-                                    {doctor.documents.map(doc => (
-                                        <li key={doc.id} className="text-blue-600 hover:text-blue-800">
-                                            <a href={doc.file_path} target="_blank" rel="noopener noreferrer" className="flex items-center">
-                                                <FaFileAlt className="mr-2"/> {doc.document_type || 'View Document'} ({new Date(doc.uploaded_at).toLocaleDateString()})
-                                            </a>
-                                        </li>
-                                    ))}
-                                </ul>
-                            ) : <p className="text-sm text-gray-500">No documents uploaded or available.</p>}
-                        </div>
-
-                        {/* Simple details view area */}
-                        {selectedDoctor && selectedDoctor.id === doctor.id && (
-                            <div className="my-4 p-3 bg-indigo-50 rounded-md border border-indigo-200">
-                                <h3 className="font-semibold text-indigo-700">Rejection Reason:</h3>
-                                <textarea 
-                                    value={rejectionReason}
-                                    onChange={(e) => setRejectionReason(e.target.value)}
-                                    placeholder="Enter reason for rejection (optional for approve)"
-                                    className="w-full p-2 border border-gray-300 rounded-md mt-1 text-sm"
-                                    rows="2"
-                                ></textarea>
-                            </div>
-                        )}
-                        
-                        <div className="mt-6 flex justify-end space-x-3">
-                            <button onClick={() => viewDoctorDetails(doctor)} className="text-sm bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium py-2 px-4 rounded-lg flex items-center transition-colors">
-                                <FaEye className="mr-2"/> {selectedDoctor?.id === doctor.id ? 'Hide Details' : 'Review'}
-                            </button>
-                            <button onClick={() => handleApprove(doctor.id)} className="text-sm bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-lg flex items-center transition-colors">
-                                <FaCheckCircle className="mr-2"/> Approve
-                            </button>
-                            <button onClick={() => handleReject(doctor.id)} className="text-sm bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg flex items-center transition-colors">
-                                <FaTimesCircle className="mr-2"/> Reject
-                            </button>
-                        </div>
-                    </div>
-                ))}
-            </div>
+                    </article>)}
+                    {action && <form onSubmit={decide} className="border rounded bg-blue-50 p-4 space-y-3">
+                        <h4 className="font-semibold">Confirm {action.kind === 'verify' ? 'doctor verification' : action.kind === 'revoke' ? 'verification revocation' : `${action.kind === 'approve' ? 'approval' : 'rejection'} of ${action.document.original_name}`}</h4>
+                        {action.kind === 'reject' && <p>Rejecting a required credential also revokes verification if no other approved copy remains.</p>}
+                        {['reject', 'revoke'].includes(action.kind) && <div><label htmlFor="review-reason">Reason</label><textarea id="review-reason" className="block w-full border rounded p-2" required maxLength={500} value={reason} disabled={busy} onChange={event => setReason(event.target.value)} /></div>}
+                        <button disabled={busy || (['reject', 'revoke'].includes(action.kind) && !reason.trim())} type="submit">{busy ? 'Saving decision…' : 'Confirm decision'}</button><button disabled={busy} type="button" onClick={() => setAction(null)}>Go back</button>
+                    </form>}
+                </>}
+            </section>
         </div>
-    );
-};
-export default DoctorVerificationPage;
+    </main>;
+}

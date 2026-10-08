@@ -2,17 +2,20 @@
 
 namespace App\Models;
 
+use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Support\Facades\DB; // Import DB Facade
+use Illuminate\Support\Facades\DB;
+
+// Import DB Facade
 
 class Doctor extends Model
 {
-    use SoftDeletes, HasFactory;
+    use HasFactory, SoftDeletes;
 
     protected $fillable = [
         'user_id',
@@ -23,7 +26,7 @@ class Doctor extends Model
         'is_verified',
         'is_active',
         'average_rating',
-        'total_reviews'
+        'total_reviews',
     ];
 
     protected $casts = [
@@ -31,7 +34,7 @@ class Doctor extends Model
         'is_verified' => 'boolean',
         'is_active' => 'boolean',
         'average_rating' => 'float',
-        'total_reviews' => 'integer'
+        'total_reviews' => 'integer',
     ];
 
     protected $appends = ['full_name', 'formatted_rating'];
@@ -90,7 +93,7 @@ class Doctor extends Model
 
         $this->update([
             'average_rating' => round($stats->avg_rating ?? 0, 2),
-            'total_reviews' => $stats->total ?? 0
+            'total_reviews' => $stats->total ?? 0,
         ]);
     }
 
@@ -111,7 +114,8 @@ class Doctor extends Model
 
     public function scopeActive($query)
     {
-        return $query->where('is_active', true);
+        return $query->where('is_active', true)
+            ->whereHas('user', fn ($user) => $user->where('status', 'actif')->whereNotNull('email_verified_at'));
     }
 
     public function scopeWithMinimumRating($query, float $rating)
@@ -128,31 +132,31 @@ class Doctor extends Model
 
     public function scopeSearch($query, array $filters)
     {
-        if (!empty($filters['speciality_id'])) {
+        if (! empty($filters['speciality_id'])) {
             $query->where('speciality_id', $filters['speciality_id']);
         }
 
-        if (!empty($filters['location'])) {
+        if (! empty($filters['location'])) {
             $query->whereHas('location', function ($q) use ($filters) {
-                $q->where('name', 'LIKE', '%' . $filters['location'] . '%');
+                $q->where('name', 'LIKE', '%'.$filters['location'].'%');
             });
         }
 
-        if (!empty($filters['language_ids'])) {
+        if (! empty($filters['language_ids'])) {
             $query->withLanguages($filters['language_ids']);
         }
 
-        if (!empty($filters['min_rating'])) {
+        if (! empty($filters['min_rating'])) {
             $query->withMinimumRating($filters['min_rating']);
         }
 
-        if (!empty($filters['name'])) {
+        if (! empty($filters['name'])) {
             $query->whereHas('user', function ($q) use ($filters) {
                 // Use database-agnostic concatenation
                 $concatExpression = DB::connection()->getDriverName() === 'sqlite'
                     ? "prenom || ' ' || nom"
                     : "CONCAT(prenom, ' ', nom)";
-                $q->where(DB::raw($concatExpression), 'LIKE', '%' . $filters['name'] . '%');
+                $q->where(DB::raw($concatExpression), 'LIKE', '%'.$filters['name'].'%');
             });
         }
 
@@ -161,7 +165,7 @@ class Doctor extends Model
 
     public function getMonthlyStats(int $year, int $month): array
     {
-        $startDate = \Carbon\Carbon::createFromDate($year, $month, 1)->startOfMonth();
+        $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
         $endDate = $startDate->copy()->endOfMonth();
 
         $appointments = $this->appointments()

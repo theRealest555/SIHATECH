@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { 
@@ -44,7 +44,6 @@ const DoctorCalendar = ({ doctorId: propDoctorId }) => {
     const [calendarEvents, setCalendarEvents] = useState([]);
     const [showBookingModal, setShowBookingModal] = useState(false);
     const [selectedSlot, setSelectedSlot] = useState(null);
-    const [doctorDetails, setDoctorDetails] = useState(null); // To store doctor's name, etc.
 
     // Redux state selectors
     const currentUser = useSelector(selectCurrentUser);
@@ -83,7 +82,7 @@ const DoctorCalendar = ({ doctorId: propDoctorId }) => {
     useEffect(() => {
         if (availability && availability.schedule) {
             const newEvents = [];
-            const { schedule, leaves } = availability;
+            const { leaves } = availability;
 
             // Add leaves to calendar
             if (Array.isArray(leaves)) {
@@ -174,7 +173,7 @@ const DoctorCalendar = ({ doctorId: propDoctorId }) => {
             <Card className="shadow-sm">
                 <Card.Header as="h4" className="bg-primary text-white">
                     <i className="fas fa-calendar-alt me-2"></i>
-                    Doctor&apos;s Calendar {doctorDetails?.name ? `- Dr. ${doctorDetails.name}` : `(ID: ${doctorId})`}
+                    Doctor&apos;s Calendar (ID: {doctorId})
                 </Card.Header>
                 <Card.Body>
                     {doctorDataError && <Alert variant="danger">{doctorDataError}</Alert>}

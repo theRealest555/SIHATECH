@@ -1,13 +1,13 @@
+import PropTypes from 'prop-types';
 // src/components/ui/PrivateRoute.jsx
-import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 
 const PrivateRoute = ({ children, roles }) => {
-    const { user, loading } = useAuth();
+    const { user, initializing } = useAuth();
     const location = useLocation();
 
-    if (loading) {
+    if (initializing) {
         return (
             <div className="flex items-center justify-center min-h-screen">
                 <div>Loading user authentication...</div>
@@ -20,9 +20,13 @@ const PrivateRoute = ({ children, roles }) => {
         return <Navigate to="/login" state={{ from: location }} replace />;
     }
 
+    if (!user.email_verified_at) {
+        return <Navigate to="/verify-email" replace />;
+    }
+
     // If roles are specified, check if the user has one of the required roles
-    // Assuming user object has a 'role' property like: user.role = 'admin' or user.role = 'doctor'
-    // Or user.roles = ['doctor', 'verified']
+    // Assuming user object has a 'role' property like: user.role = 'admin' or user.role = 'medecin'
+    // Or user.roles = ['medecin', 'verified']
     // Adjust this logic based on your actual user object structure
     if (roles && roles.length > 0) {
         const userRole = user.role; // Example: user.role = "doctor"
@@ -32,7 +36,7 @@ const PrivateRoute = ({ children, roles }) => {
             // Or to a specific dashboard based on their actual role
             let fallbackPath = '/';
             if (userRole === 'admin') fallbackPath = '/admin/dashboard';
-            else if (userRole === 'doctor') fallbackPath = '/doctor/dashboard';
+            else if (userRole === 'medecin') fallbackPath = '/doctor/dashboard';
             else if (userRole === 'patient') fallbackPath = '/patient/dashboard';
             
             return <Navigate to={fallbackPath} state={{ from: location }} replace />;
@@ -41,12 +45,14 @@ const PrivateRoute = ({ children, roles }) => {
     
     // Specifically for doctors, check if their profile is complete for certain routes
     // This is a common pattern for onboarding.
-    // Example: if (user.role === 'doctor' && !user.doctor_profile_completed && location.pathname !== '/doctor/complete-profile') {
+    // Example: if (user.role === 'medecin' && !user.doctor_profile_completed && location.pathname !== '/doctor/complete-profile') {
     //     return <Navigate to="/doctor/complete-profile" state={{ from: location }} replace />;
     // }
 
 
     return children;
 };
+
+PrivateRoute.propTypes = { children: PropTypes.node.isRequired, roles: PropTypes.arrayOf(PropTypes.oneOf(['admin', 'medecin', 'patient'])) };
 
 export default PrivateRoute;

@@ -4,10 +4,15 @@
 /public/hot
 /public/storage
 /storage/*.key
+/storage/app/e2e-runs/
+/storage/app/concurrency-runs/
 /vendor
 .env
 .env.backup
 .env.production
+.env.*
+!.env.example
+!.env.testing
 .phpunit.result.cache
 Homestead.json
 Homestead.yaml

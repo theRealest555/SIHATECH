@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Webhooks;
 
 use App\Http\Controllers\Controller;
 use App\Services\StripePaymentService;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
 class StripeWebhookController extends Controller
@@ -25,8 +25,9 @@ class StripeWebhookController extends Controller
         $payload = $request->getContent();
         $signature = $request->header('Stripe-Signature');
 
-        if (!$signature) {
+        if (! $signature) {
             Log::error('Stripe webhook received without signature');
+
             return response()->json(['error' => 'Missing signature'], 400);
         }
 
@@ -36,6 +37,6 @@ class StripeWebhookController extends Controller
             return response()->json(['status' => 'success'], 200);
         }
 
-        return response()->json(['error' => $result['error']], 400);
+        return response()->json(['error' => $result['error']], $result['status'] ?? 400);
     }
 }

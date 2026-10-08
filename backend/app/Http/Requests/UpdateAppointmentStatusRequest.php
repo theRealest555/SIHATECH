@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -18,12 +19,12 @@ class UpdateAppointmentStatusRequest extends FormRequest
     /**
      * Get the validation rules that apply to the request.
      *
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
+     * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
         return [
-            'statut' => ['required', Rule::in(['confirmé', 'en_attente', 'annulé', 'terminé'])],
+            'statut' => ['required', Rule::in($this->user()?->role === 'patient' ? ['annulé'] : ['confirmé', 'annulé', 'terminé'])],
         ];
     }
 

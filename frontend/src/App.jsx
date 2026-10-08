@@ -1,10 +1,9 @@
 // src/App.jsx
-import React, { Suspense, lazy } from 'react';
+import { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import MainLayout from './components/layouts/MainLayout';
 import PrivateRoute from './components/ui/PrivateRoute';
 import { useAuth } from './hooks/useAuth';
-import './App.css'; // Assuming you have a global CSS file for styles
 
 
 // Lazy load pages
@@ -29,8 +28,11 @@ const DoctorDashboardPage = lazy(() => import('./pages/doctor/DashboardPage'));
 const PatientDashboardPage = lazy(() => import('./pages/patient/DashboardPage'));
 
 // Admin Pages
+const DoctorVerificationPage = lazy(() => import('./pages/admin/DoctorVerificationPage'));
 const UserListPage = lazy(() => import('./pages/admin/UserListPage'));
-// ... other admin pages
+const SpecialityManagementPage = lazy(() => import('./pages/admin/SpecialityManagementPage'));
+const LanguageManagementPage = lazy(() => import('./pages/admin/LanguageManagementPage'));
+const AuditLogPage = lazy(() => import('./pages/admin/AuditLogPage'));
 
 // Doctor Pages
 const DoctorAppointmentsPage = lazy(() => import('./pages/doctor/AppointmentsPage'));
@@ -40,6 +42,10 @@ const DoctorStatisticsPage = lazy(() => import('./pages/doctor/StatisticsPage'))
 
 
 // Patient Pages
+const PatientReviewPage = lazy(() => import('./pages/patient/ReviewPage'));
+const SubscriptionPlanManagementPage = lazy(() => import('./pages/admin/SubscriptionPlanManagementPage'));
+const ReviewModerationPage = lazy(() => import('./pages/admin/ReviewModerationPage'));
+const AdminReportsPage = lazy(() => import('./pages/admin/ReportsPage'));
 const PatientAppointmentsPage = lazy(() => import('./pages/patient/AppointmentsPage'));
 const FindDoctorPage = lazy(() => import('./pages/patient/FindDoctorPage'));
 const PublicDoctorProfileViewPage = lazy(() => import('./pages/patient/DoctorProfilePage')); // Public view
@@ -53,9 +59,9 @@ const SocialAuthCallback = lazy(() => import('./components/SocialAuthCallback'))
 
 
 function App() {
-  const { user, loading } = useAuth();
+  const { user, initializing } = useAuth();
 
-  if (loading) {
+  if (initializing) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-xl font-semibold">Loading Application...</div>
@@ -76,6 +82,7 @@ function App() {
           <Route path="forgot-password" element={<ForgotPasswordPage />} />
           <Route path="reset-password/:token" element={<ResetPasswordPage />} /> {/* Ensure backend route matches */}
           <Route path="email/verify/:id/:hash" element={<VerifyEmailPage />} /> {/* Ensure backend route matches */}
+          <Route path="verify-email" element={<VerifyEmailPage />} />
           <Route path="doctors" element={<FindDoctorPage />} /> {/* Public doctor search */}
           <Route path="doctors/:doctorId" element={<PublicDoctorProfileViewPage />} /> {/* Public doctor profile */}
           <Route path="subscription-plans" element={<SubscriptionPlansPage />} />
@@ -88,22 +95,29 @@ function App() {
           {/* Patient Routes */}
           <Route path="patient/dashboard" element={<PrivateRoute roles={['patient']}><PatientDashboardPage /></PrivateRoute>} />
           <Route path="patient/profile" element={<PrivateRoute roles={['patient']}><PatientProfilePage /></PrivateRoute>} />
+          <Route path="patient/appointments/:appointmentId/review" element={<PrivateRoute roles={['patient']}><PatientReviewPage /></PrivateRoute>} />
           <Route path="patient/appointments" element={<PrivateRoute roles={['patient']}><PatientAppointmentsPage /></PrivateRoute>} />
           
           {/* Doctor Routes */}
-          <Route path="doctor/dashboard" element={<PrivateRoute roles={['doctor']}><DoctorDashboardPage /></PrivateRoute>} />
-          <Route path="doctor/complete-profile" element={<PrivateRoute roles={['doctor']}><DoctorCompleteProfilePage /></PrivateRoute>} />
-          <Route path="doctor/profile" element={<PrivateRoute roles={['doctor']}><DoctorProfilePage /></PrivateRoute>} />
-          <Route path="doctor/appointments" element={<PrivateRoute roles={['doctor']}><DoctorAppointmentsPage /></PrivateRoute>} />
-          <Route path="doctor/availability" element={<PrivateRoute roles={['doctor']}><DoctorAvailabilityPage /></PrivateRoute>} />
-          <Route path="doctor/documents" element={<PrivateRoute roles={['doctor']}><DoctorDocumentsPage /></PrivateRoute>} />
-          <Route path="doctor/statistics" element={<PrivateRoute roles={['doctor']}><DoctorStatisticsPage /></PrivateRoute>} />
+          <Route path="doctor/dashboard" element={<PrivateRoute roles={['medecin']}><DoctorDashboardPage /></PrivateRoute>} />
+          <Route path="doctor/complete-profile" element={<PrivateRoute roles={['medecin']}><DoctorCompleteProfilePage /></PrivateRoute>} />
+          <Route path="doctor/profile" element={<PrivateRoute roles={['medecin']}><DoctorProfilePage /></PrivateRoute>} />
+          <Route path="doctor/appointments" element={<PrivateRoute roles={['medecin']}><DoctorAppointmentsPage /></PrivateRoute>} />
+          <Route path="doctor/availability" element={<PrivateRoute roles={['medecin']}><DoctorAvailabilityPage /></PrivateRoute>} />
+          <Route path="doctor/documents" element={<PrivateRoute roles={['medecin']}><DoctorDocumentsPage /></PrivateRoute>} />
+          <Route path="doctor/statistics" element={<PrivateRoute roles={['medecin']}><DoctorStatisticsPage /></PrivateRoute>} />
 
 
           {/* Admin Routes */}
           <Route path="admin/dashboard" element={<PrivateRoute roles={['admin']}><AdminDashboardPage /></PrivateRoute>} />
           <Route path="admin/users" element={<PrivateRoute roles={['admin']}><UserListPage /></PrivateRoute>} />
-          {/* Add other admin routes here: e.g., /admin/doctors-verification, /admin/reports */}
+          <Route path="admin/doctors-verification" element={<PrivateRoute roles={['admin']}><DoctorVerificationPage /></PrivateRoute>} />
+          <Route path="admin/specialities" element={<PrivateRoute roles={['admin']}><SpecialityManagementPage /></PrivateRoute>} />
+          <Route path="admin/languages" element={<PrivateRoute roles={['admin']}><LanguageManagementPage /></PrivateRoute>} />
+          <Route path="admin/subscription-plans" element={<PrivateRoute roles={['admin']}><SubscriptionPlanManagementPage /></PrivateRoute>} />
+          <Route path="admin/reviews" element={<PrivateRoute roles={['admin']}><ReviewModerationPage /></PrivateRoute>} />
+          <Route path="admin/audit-logs" element={<PrivateRoute roles={['admin']}><AuditLogPage /></PrivateRoute>} />
+          <Route path="admin/reports" element={<PrivateRoute roles={['admin']}><AdminReportsPage /></PrivateRoute>} />
 
           {/* Subscription Management for Authenticated Users */}
           <Route path="my-subscription" element={<PrivateRoute><SubscriptionStatusPage /></PrivateRoute>} />

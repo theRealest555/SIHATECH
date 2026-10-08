@@ -2,11 +2,11 @@
 
 namespace Database\Factories;
 
-use Illuminate\Database\Eloquent\Factories\Factory;
 use App\Models\Speciality;
+use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
- * @extends \Illuminate\Database\Eloquent\Factories\Factory<\App\Models\Speciality>
+ * @extends Factory<Speciality>
  */
 class SpecialityFactory extends Factory
 {
@@ -15,7 +15,7 @@ class SpecialityFactory extends Factory
     public function definition()
     {
         return [
-            'nom' => $this->faker->word,
+            'nom' => $this->faker->unique()->word,
             'description' => $this->faker->text,
         ];
     }

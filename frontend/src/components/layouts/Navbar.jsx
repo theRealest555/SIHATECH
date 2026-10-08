@@ -1,102 +1,46 @@
-// src/components/layouts/Navbar.jsx
-import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../../hooks/useAuth'; // Corrected path
-import { FaUserCircle, FaSignOutAlt, FaTachometerAlt, FaSignInAlt, FaUserPlus } from 'react-icons/fa'; // Example icons
+import { useEffect, useRef, useState } from 'react';
+import { Link, NavLink, useLocation } from 'react-router-dom';
+import { useAuth } from '../../hooks/useAuth';
+import './Navbar.css';
 
-const Navbar = () => {
-    const { user, logout } = useAuth();
-    const navigate = useNavigate();
+const item = (to, label, icon) => ({ to, label, icon });
+const publicLinks = [item('/', 'Home', 'house'), item('/doctors', 'Find a doctor', 'search'), item('/subscription-plans', 'Plans', 'layers')];
+const roleNames = { patient: 'Patient workspace', medecin: 'Doctor workspace', admin: 'Administration' };
 
-    const handleLogout = async () => {
-        await logout();
-        // Navigation is handled within the logout function in AuthContext
-    };
-
-    const getDashboardPath = () => {
-        if (!user) return '/';
-        switch (user.role) {
-            case 'admin':
-                return '/admin/dashboard';
-            case 'doctor':
-                return '/doctor/dashboard';
-            case 'patient':
-                return '/patient/dashboard';
-            default:
-                return '/dashboard'; // A generic dashboard or redirector component
-        }
-    };
-    
-    const getProfilePath = () => {
-        if (!user) return '/login';
-        switch (user.role) {
-            case 'admin':
-                return '/admin/profile'; // Assuming an admin profile page
-            case 'doctor':
-                return '/doctor/profile';
-            case 'patient':
-                return '/patient/profile';
-            default:
-                return '/profile'; 
-        }
-    };
-
-
-    return (
-        <nav className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white shadow-lg">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex items-center justify-between h-20">
-                    <div className="flex items-center">
-                        <Link to="/" className="text-2xl font-bold tracking-tight hover:text-indigo-200 transition duration-150">
-                           SIHA<span className="text-blue-300">TECH</span>
-                        </Link>
-                    </div>
-                    <div className="hidden md:block">
-                        <div className="ml-10 flex items-baseline space-x-4">
-                            <Link to="/" className="px-3 py-2 rounded-md text-sm font-medium hover:bg-indigo-500 hover:bg-opacity-75 transition duration-150">Home</Link>
-                            <Link to="/doctors" className="px-3 py-2 rounded-md text-sm font-medium hover:bg-indigo-500 hover:bg-opacity-75 transition duration-150">Find a Doctor</Link>
-                            <Link to="/subscription-plans" className="px-3 py-2 rounded-md text-sm font-medium hover:bg-indigo-500 hover:bg-opacity-75 transition duration-150">Plans</Link>
-                            {/* Add more public links as needed */}
-                        </div>
-                    </div>
-                    <div className="hidden md:block">
-    <div className="ml-4 flex items-center md:ml-6">
-        {user ? (
-            <>
-                <span className="mr-3 text-sm">
-                    Welcome, {user.first_name || user.name || 'User'} ({user.role})
-                </span>
-                <Link to={getDashboardPath()} className="p-2 rounded-full hover:bg-indigo-500 hover:bg-opacity-75 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-indigo-700 focus:ring-white transition duration-150" title="Dashboard">
-                    <FaTachometerAlt className="h-6 w-6" />
-                </Link>
-                <Link to={getProfilePath()} className="ml-3 p-2 rounded-full hover:bg-indigo-500 hover:bg-opacity-75 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-indigo-700 focus:ring-white transition duration-150" title="Profile">
-                    <FaUserCircle className="h-6 w-6" />
-                </Link>
-                <button
-                    onClick={handleLogout}
-                    className="ml-3 p-2 rounded-full text-red-300 hover:bg-red-500 hover:text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-indigo-700 focus:ring-white transition duration-150"
-                    title="Logout"
-                >
-                    <FaSignOutAlt className="h-6 w-6" />
-                </button>
-            </>
-        ) : (
-            <>
-                <Link to="/login" className="flex items-center px-3 py-2 rounded-md text-sm font-medium hover:bg-indigo-500 hover:bg-opacity-75 transition duration-150">
-                    <FaSignInAlt className="mr-1" /> Login
-                </Link>
-                <Link to="/register" className="flex items-center ml-2 px-3 py-2 rounded-md text-sm font-medium bg-gradient-to-r from-blue-500 to-indigo-500 text-white hover:from-blue-600 hover:to-indigo-600 shadow transition duration-150">
-                   <FaUserPlus className="mr-1" /> Sign Up
-                </Link>
-            </>
-        )}
-    </div>
-</div>
-                    {/* Mobile menu button (implement if needed) */}
-                </div>
-            </div>
-        </nav>
-    );
-};
-
-export default Navbar;
+export default function Navbar() {
+    const { user, logout, loading, authError } = useAuth();
+    const [open, setOpen] = useState(false);
+    const toggleRef = useRef(null);
+    const location = useLocation();
+    const rolePath = { patient: 'patient', medecin: 'doctor', admin: 'admin' }[user?.role];
+    useEffect(() => {
+        if (!open) return;
+        const close = event => { if (event.key === 'Escape') { setOpen(false); toggleRef.current?.focus(); } };
+        document.addEventListener('keydown', close);
+        return () => document.removeEventListener('keydown', close);
+    }, [open]);
+    const groups = user ? [
+        { title: 'Workspace', links: [item(rolePath ? `/${rolePath}/dashboard` : '/dashboard', 'Dashboard', 'grid'),
+            ...(rolePath === 'admin' ? [item('/admin/users', 'Users', 'people'), item('/admin/doctors-verification', 'Doctor verification', 'patch-check'), item('/admin/reviews', 'Review moderation', 'chat-square-text')]
+                : [item(`/${rolePath}/appointments`, 'Appointments', 'calendar2-week'), ...(rolePath === 'doctor' ? [item('/doctor/availability', 'Availability', 'clock'), item('/doctor/documents', 'Documents', 'file-earmark-text'), item('/doctor/statistics', 'Statistics', 'bar-chart')] : [item('/doctors', 'Find a doctor', 'search')])]) ] },
+        { title: rolePath === 'admin' ? 'Management' : 'Account', links: rolePath === 'admin'
+            ? [item('/admin/reports', 'Reports', 'bar-chart'), item('/admin/audit-logs', 'Audit history', 'shield-check'), item('/admin/specialities', 'Specialities', 'heart-pulse'), item('/admin/languages', 'Languages', 'translate'), item('/admin/subscription-plans', 'Plan management', 'layers')]
+            : [item(`/${rolePath}/profile`, 'Profile', 'person'), item('/my-subscription', 'Subscription', 'credit-card')] },
+        { title: 'Explore', links: rolePath === 'admin' ? [...publicLinks, item('/my-subscription', 'Subscription', 'credit-card')] : [item('/', 'Home', 'house'), item('/subscription-plans', 'Plans', 'layers')] },
+    ] : [{ title: '', links: [...publicLinks, item('/login', 'Sign in', 'person'), item('/register', 'Create account', 'arrow-right')] }];
+    const current = groups.flatMap(group => group.links).find(link => link.to === location.pathname)?.label || 'Workspace';
+    const name = [user?.prenom, user?.nom].filter(Boolean).join(' ') || 'Your account';
+    const initials = name.split(' ').slice(0, 2).map(part => part[0]).join('');
+    const brand = <Link to="/" className="site-brand" onClick={() => setOpen(false)}><span className="brand-mark" aria-hidden="true">+</span><span>siha<span className="brand-light">tech</span><small>CARE, CONNECTED.</small></span></Link>;
+    const menu = <nav id="site-navigation-links" aria-label="Main navigation" className={`site-navigation-links ${open ? 'is-open' : ''}`}>
+        {groups.map(group => <div className="nav-group" key={group.title}>{group.title && <p className="nav-group-title">{group.title}</p>}{group.links.map(link => <NavLink key={link.to} to={link.to} end={link.to === '/' || link.to.endsWith('/dashboard')} onClick={() => setOpen(false)}><i aria-hidden="true" className={`bi bi-${link.icon}`} /><span>{link.label}</span></NavLink>)}</div>)}
+        {user && <div className="sidebar-account"><span className="account-avatar" aria-hidden="true">{initials}</span><div><strong>{name}</strong><small>{roleNames[user.role]}</small></div><button type="button" disabled={loading} onClick={async () => { if (await logout()) setOpen(false); }} aria-label={loading ? 'Signing out…' : 'Sign out'} title="Sign out"><i aria-hidden="true" className="bi bi-box-arrow-right" /></button></div>}
+    </nav>;
+    return <>
+        <header className={`site-navigation ${user ? 'workspace-sidebar' : 'public-navigation'}`}>
+            <div className="site-navigation-inner">{brand}<button ref={toggleRef} type="button" className="site-menu-toggle" aria-controls="site-navigation-links" aria-expanded={open} onClick={() => setOpen(value => !value)}><i aria-hidden="true" className={`bi bi-${open ? 'x-lg' : 'list'}`} /> {open ? 'Close menu' : 'Menu'}</button>{menu}</div>
+            {user && authError && <p role="alert" className="site-navigation-error">{authError}</p>}
+        </header>
+        {user && <div className="workspace-topbar"><div className="workspace-breadcrumb"><span>{roleNames[user.role]}</span><i className="bi bi-chevron-right" aria-hidden="true" /><strong>{current}</strong></div><div className="topbar-account"><span className="workspace-indicator" aria-hidden="true" />{roleNames[user.role]}<span className="account-avatar" aria-hidden="true">{initials}</span></div></div>}
+    </>;
+}

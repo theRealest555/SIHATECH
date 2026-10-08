@@ -2,17 +2,15 @@
 
 namespace Tests\Feature\Admin;
 
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\TestCase;
-use App\Models\User;
 use App\Models\Admin;
 use App\Models\Avis;
-use App\Models\Rendezvous;
-use App\Models\Payment;
 use App\Models\Doctor;
-use App\Models\Patient;
-use App\Models\Speciality;
+use App\Models\Payment;
+use App\Models\Rendezvous;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use Tests\TestCase;
 
 class AdminControllerTest extends TestCase
 {
@@ -24,7 +22,7 @@ class AdminControllerTest extends TestCase
     {
         parent::setUp();
         $this->adminUser = User::factory()->create(['role' => 'admin', 'status' => 'actif']);
-        if (!$this->adminUser->admin) {
+        if (! $this->adminUser->admin) {
             Admin::factory()->active()->create(['user_id' => $this->adminUser->id]);
         } else {
             $this->adminUser->admin->update(['admin_status' => 1]);
@@ -37,7 +35,7 @@ class AdminControllerTest extends TestCase
         User::factory(5)->create(['role' => 'patient']);
         $doctorUsers = User::factory(2)->create(['role' => 'medecin']);
         foreach ($doctorUsers as $docUser) {
-            if (!$docUser->doctor) {
+            if (! $docUser->doctor) {
                 Doctor::factory()->create(['user_id' => $docUser->id]);
             }
         }
@@ -85,14 +83,14 @@ class AdminControllerTest extends TestCase
         $patientToSearch = User::factory()->create(['role' => 'patient', 'nom' => 'SearchablePatientName']);
         $response = $this->getJson('/api/admin/users?search=SearchablePatientName');
         $response->assertStatus(200)
-                 ->assertJsonFragment(['nom' => 'SearchablePatientName']);
+            ->assertJsonFragment(['nom' => 'SearchablePatientName']);
     }
 
     public function test_admin_can_update_user_status(): void
     {
         $userToUpdate = User::factory()->create(['status' => 'actif']);
 
-        $response = $this->putJson("/api/admin/users/{$userToUpdate->id}/status", ['status' => 'inactif']);
+        $response = $this->putJson("/api/admin/users/{$userToUpdate->id}/status", $this->statusDecision($userToUpdate, ['status' => 'inactif']));
 
         $response->assertStatus(200)
             ->assertJson([
@@ -122,6 +120,7 @@ class AdminControllerTest extends TestCase
 
         $response = $this->postJson("/api/admin/reviews/{$review->id}/moderate", [
             'action' => 'approve',
+            'expected_status' => 'pending',
         ]);
 
         $response->assertStatus(200)
@@ -143,6 +142,7 @@ class AdminControllerTest extends TestCase
 
         $response = $this->postJson("/api/admin/reviews/{$review->id}/moderate", [
             'action' => 'reject',
+            'expected_status' => 'pending',
             'reason' => $rejectionReason,
         ]);
 
@@ -179,7 +179,9 @@ class AdminControllerTest extends TestCase
         // Check if the header row is present at the beginning of the string
         $this->assertStringStartsWith('ID,Nom,Prénom,Email,Rôle,Statut,"Date d\'inscription"', $csvOutput);
         foreach (User::all() as $user) {
-            if ($user->id === $this->adminUser->id) continue; // Skip the admin user used for auth if it's among the created ones
+            if ($user->id === $this->adminUser->id) {
+                continue;
+            } // Skip the admin user used for auth if it's among the created ones
             $this->assertStringContainsString($user->email, $csvOutput);
         }
     }
@@ -191,11 +193,11 @@ class AdminControllerTest extends TestCase
         $response->assertStatus(501)
             ->assertJson([
                 'message' => 'Excel export is not yet implemented. Please use CSV format.',
-                'requested_format' => 'excel'
+                'requested_format' => 'excel',
             ]);
     }
 
-     public function test_non_admin_cannot_access_admin_routes(): void
+    public function test_non_admin_cannot_access_admin_routes(): void
     {
         $patientUser = User::factory()->create(['role' => 'patient']);
         Sanctum::actingAs($patientUser, ['role:patient']);
@@ -216,6 +218,6 @@ class AdminControllerTest extends TestCase
 
         $response = $this->getJson('/api/admin/users');
         $response->assertStatus(403)
-                 ->assertJson(['message' => 'Unauthorized access']);
+            ->assertJson(['message' => 'Administrator access is disabled.']);
     }
 }

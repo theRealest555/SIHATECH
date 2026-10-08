@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import PropTypes from 'prop-types';
+import { useState, useEffect } from 'react';
 import { Form } from 'react-bootstrap';
-import ApiService from '../services/ApiService';
+import ApiService from '../services/api';
 
 function DoctorSelector({ doctorId, setDoctorId }) {
   const [doctors, setDoctors] = useState([]);
@@ -40,5 +41,7 @@ function DoctorSelector({ doctorId, setDoctorId }) {
     </Form.Group>
   );
 }
+
+DoctorSelector.propTypes = { doctorId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]), setDoctorId: PropTypes.func.isRequired };
 
 export default DoctorSelector;

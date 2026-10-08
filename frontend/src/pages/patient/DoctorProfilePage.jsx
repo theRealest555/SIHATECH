@@ -1,265 +1,126 @@
-// src/pages/patient/DoctorProfilePage.jsx
-import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
-// import { getPublicDoctorDetails, getDoctorAvailability, getDoctorReviews, addDoctorReview } from '../../services/doctorService'; // Assuming public doctor service
-import { useAuth } from '../../hooks/useAuth'; // To check if patient is logged in for reviews
-import { FaUserMd, FaMapMarkerAlt, FaGraduationCap, FaLanguage, FaStar, FaCalendarAlt, FaCommentMedical, FaPaperPlane, FaSpinner } from 'react-icons/fa';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useAuth } from '../../hooks/useAuth';
+import { getDoctorSlots, getPublicDoctorDetails } from '../../services/doctorService';
+import { bookAppointment } from '../../services/patientService';
+import DoctorAvatar from '../../components/ui/DoctorAvatar';
+import { apiError } from '../../utils/apiErrors';
 
-const PublicDoctorProfileViewPage = () => {
+export default function PublicDoctorProfileViewPage() {
     const { doctorId } = useParams();
-    const { user } = useAuth(); // Get authenticated user
-    const [doctor, setDoctor] = useState(null);
-    const [availability, setAvailability] = useState([]); // e.g., [{date: '2024-06-20', slots: ['10:00', '10:30']}]
-    const [reviews, setReviews] = useState([]);
-    const [loading, setLoading] = useState({ profile: true, availability: true, reviews: true });
-    const [error, setError] = useState(null);
-
-    // Review form state
-    const [newReview, setNewReview] = useState({ rating: 5, comment: '' });
-    const [reviewSubmitting, setReviewSubmitting] = useState(false);
-    const [reviewError, setReviewError] = useState('');
-    
-    // Mock Data
-    const mockDoctorDetails = {
-        id: parseInt(doctorId),
-        user: { first_name: 'Emily', last_name: 'Carter', email: 'emily.carter@example.com', profile_image_url: null },
-        speciality: { name: 'Cardiology' },
-        location: { address_line1: '123 Health St', city: 'New York', country: 'USA', postal_code: '10001' },
-        bio: 'Dedicated cardiologist with 10+ years of experience in treating heart conditions. Passionate about patient education and preventive care.',
-        experience_years: 12,
-        consultation_fee: 150,
-        languages: [{name: 'English'}, {name: 'Spanish'}],
-        education: 'MD from Harvard Medical School, Cardiology Fellowship at Stanford.',
-        average_rating: 4.8,
-    };
-    const mockAvailability = [
-        { date: '2024-06-20', slots: ['10:00 AM', '10:30 AM', '11:00 AM', '02:00 PM'] },
-        { date: '2024-06-21', slots: ['09:00 AM', '09:30 AM', '03:00 PM', '03:30 PM'] },
-    ];
-    const mockReviews = [
-        { id: 1, patient: { name: 'John D.' }, rating: 5, comment: 'Dr. Carter is excellent, very attentive and knowledgeable.', created_at: '2024-05-15T10:00:00Z' },
-        { id: 2, patient: { name: 'Alice S.' }, rating: 4, comment: 'Good experience, waiting time was a bit long.', created_at: '2024-05-10T14:00:00Z' },
-    ];
-
-
-    const fetchDoctorData = useCallback(async () => {
-        setLoading(prev => ({ ...prev, profile: true, availability: true, reviews: true }));
-        // try {
-        //     const [profileRes, availRes, reviewRes] = await Promise.all([
-        //         getPublicDoctorDetails(doctorId),
-        //         getDoctorAvailability(doctorId), // This might need date params
-        //         getDoctorReviews(doctorId)
-        //     ]);
-        //     setDoctor(profileRes.data.doctor || profileRes.data);
-        //     setAvailability(availRes.data.availability || []);
-        //     setReviews(reviewRes.data.reviews || []);
-        //     setError(null);
-        // } catch (err) {
-        //     setError(err.message || 'Failed to load doctor profile.');
-        //     console.error("Error fetching doctor data:", err);
-        // } finally {
-        //     setLoading({ profile: false, availability: false, reviews: false });
-        // }
-        setTimeout(() => { // Mock API
-            setDoctor(mockDoctorDetails);
-            setAvailability(mockAvailability);
-            setReviews(mockReviews);
-            setLoading({ profile: false, availability: false, reviews: false });
-        }, 1000);
-    }, [doctorId]);
+    const { user } = useAuth();
+    const navigate = useNavigate();
+    const location = useLocation();
+    const requestedDate = new URLSearchParams(location.search).get('date');
+    const [profile, setProfile] = useState(null);
+    const [profileLoading, setProfileLoading] = useState(true);
+    const [profileError, setProfileError] = useState('');
+    const [date, setDate] = useState('');
+    const [slots, setSlots] = useState([]);
+    const [slotMeta, setSlotMeta] = useState({});
+    const [slotLoading, setSlotLoading] = useState(false);
+    const [slotError, setSlotError] = useState('');
+    const [selectedSlot, setSelectedSlot] = useState('');
+    const [booking, setBooking] = useState(false);
+    const [bookingError, setBookingError] = useState('');
+    const [retry, setRetry] = useState(0);
+    const [slotRetry, setSlotRetry] = useState(0);
 
     useEffect(() => {
-        fetchDoctorData();
-    }, [fetchDoctorData]);
+        const controller = new AbortController();
+        setProfileLoading(true);
+        setProfileError('');
+        setProfile(null);
+        setDate('');
+        setSelectedSlot('');
+        setBookingError('');
+        getPublicDoctorDetails(doctorId, { signal: controller.signal }).then(response => {
+            if (controller.signal.aborted) return;
+            setProfile(response.data);
+            const today = response.data.meta.today;
+            setDate(/^\d{4}-\d{2}-\d{2}$/.test(requestedDate || '') && requestedDate >= today ? requestedDate : today);
+        }).catch(err => {
+            if (!controller.signal.aborted) setProfileError(err.response?.status === 404 ? 'This doctor is no longer available for booking.' : apiError(err, 'The doctor profile could not be loaded.'));
+        }).finally(() => { if (!controller.signal.aborted) setProfileLoading(false); });
+        return () => controller.abort();
+    }, [doctorId, requestedDate, retry]);
 
-    const handleReviewChange = (e) => setNewReview({...newReview, [e.target.name]: e.target.value });
+    useEffect(() => {
+        if (!date || !profile) return;
+        const controller = new AbortController();
+        setSlotLoading(true);
+        setSlotError('');
+        setSelectedSlot('');
+        setSlots([]);
+        getDoctorSlots(doctorId, date, { signal: controller.signal }).then(response => {
+            if (controller.signal.aborted) return;
+            setSlots(response.data.data);
+            setSlotMeta(response.data.meta);
+        }).catch(err => {
+            if (!controller.signal.aborted) setSlotError(apiError(err, 'Available times could not be loaded. Please try again.'));
+        }).finally(() => { if (!controller.signal.aborted) setSlotLoading(false); });
+        return () => controller.abort();
+    }, [doctorId, date, profile, slotRetry]);
 
-    const handleReviewSubmit = async (e) => {
-        e.preventDefault();
-        if (!user || user.role !== 'patient') {
-            setReviewError('You must be logged in as a patient to submit a review.');
-            return;
-        }
-        if (!newReview.comment.trim() || newReview.rating < 1 || newReview.rating > 5) {
-            setReviewError('Please provide a valid rating and comment.');
-            return;
-        }
-        setReviewSubmitting(true);
-        setReviewError('');
-        // try {
-        //     await addDoctorReview(doctorId, { rating: parseInt(newReview.rating), comment: newReview.comment });
-        //     setNewReview({ rating: 5, comment: '' });
-        //     fetchDoctorData(); // Re-fetch to show new review
-        //     alert('Review submitted successfully!');
-        // } catch (err) {
-        //     setReviewError(err.response?.data?.message || 'Failed to submit review.');
-        // } finally {
-        //     setReviewSubmitting(false);
-        // }
-        alert(`Mock review submitted: ${newReview.rating} stars, "${newReview.comment}"`);
-        setReviews(prev => [...prev, {id: Date.now(), patient: {name: user.first_name || 'You'}, rating: newReview.rating, comment: newReview.comment, created_at: new Date().toISOString()}]);
-        setNewReview({ rating: 5, comment: '' });
-        setReviewSubmitting(false);
-    };
-    
-    if (loading.profile) return <div className="p-10 text-center flex justify-center items-center min-h-screen"><FaSpinner className="animate-spin h-10 w-10 text-indigo-600 mr-3"/> Loading doctor's profile...</div>;
-    if (error) return <div className="p-10 text-center text-red-500 bg-red-100 rounded-md shadow">Error: {error}</div>;
-    if (!doctor) return <div className="p-10 text-center text-gray-600">Doctor not found.</div>;
+    async function book(event) {
+        event.preventDefault();
+        if (!selectedSlot || booking || slotLoading || user?.role !== 'patient' || !user.email_verified_at) return;
+        setBooking(true);
+        setBookingError('');
+        try {
+            await bookAppointment({ doctor_id: doctorId, date_heure: `${date} ${selectedSlot}:00` });
+            navigate('/patient/appointments', { state: { message: 'Your appointment request was sent. It is awaiting confirmation from the doctor.' } });
+        } catch (err) {
+            setBookingError(apiError(err, 'Booking could not be confirmed. Check My appointments before trying again.'));
+            if (err.response?.status === 409) {
+                setSelectedSlot('');
+                setSlotRetry(value => value + 1);
+            }
+        } finally { setBooking(false); }
+    }
 
-    return (
-        <div className="bg-gray-50 min-h-screen py-8 md:py-12">
-            <div className="max-w-4xl mx-auto bg-white shadow-2xl rounded-xl overflow-hidden">
-                {/* Profile Header */}
-                <div className="md:flex">
-                    <div className="md:flex-shrink-0">
-                        <img 
-                            className="h-48 w-full object-cover md:w-48 md:h-full" 
-                            src={doctor.user.profile_image_url || `https://ui-avatars.com/api/?name=${doctor.user.first_name}+${doctor.user.last_name}&size=256&background=random&color=fff`} 
-                            alt={`Dr. ${doctor.user.first_name} ${doctor.user.last_name}`}
-                        />
-                    </div>
-                    <div className="p-8 flex-grow">
-                        <div className="uppercase tracking-wide text-sm text-indigo-600 font-semibold">{doctor.speciality.name}</div>
-                        <h1 className="block mt-1 text-3xl leading-tight font-bold text-gray-900">Dr. {doctor.user.first_name} {doctor.user.last_name}</h1>
-                        <div className="mt-2 flex items-center text-yellow-500">
-                            {[...Array(Math.floor(doctor.average_rating || 0))].map((_, i) => <FaStar key={`star-${i}`} />)}
-                            {[...Array(5 - Math.floor(doctor.average_rating || 0))].map((_, i) => <FaStar key={`empty-star-${i}`} className="text-gray-300"/>)}
-                            <span className="ml-2 text-gray-600 text-sm">({doctor.average_rating || 'N/A'} average rating)</span>
-                        </div>
-                        <p className="mt-3 text-gray-600 text-sm">{doctor.bio}</p>
-                        <p className="mt-3 text-gray-700 font-semibold">Consultation Fee: ${doctor.consultation_fee || 'N/A'}</p>
-                    </div>
-                </div>
+    if (profileLoading) return <div className="max-w-4xl mx-auto p-8"><p role="status">Loading doctor profile…</p></div>;
+    if (profileError) return <div className="max-w-4xl mx-auto p-8"><p role="alert">{profileError}</p><button onClick={() => setRetry(value => value + 1)} className="underline mt-4">Try again</button> <Link to="/doctors" className="underline ml-4">Find another doctor</Link></div>;
+    const doctor = profile.data;
+    const timezone = slotMeta.timezone || profile.meta.timezone;
+    const canBook = user?.role === 'patient' && Boolean(user.email_verified_at);
 
-                {/* Details Section */}
-                <div className="border-t border-gray-200">
-                    <dl>
-                        <DetailItem icon={<FaGraduationCap/>} label="Education & Experience" value={`${doctor.education} (${doctor.experience_years} years experience)`} />
-                        <DetailItem icon={<FaMapMarkerAlt/>} label="Practice Location" value={`${doctor.location.address_line1}, ${doctor.location.city}, ${doctor.location.postal_code}, ${doctor.location.country}`} />
-                        <DetailItem icon={<FaLanguage/>} label="Languages Spoken" value={doctor.languages.map(lang => lang.name).join(', ')} />
-                    </dl>
-                </div>
-
-                {/* Availability Section */}
-                <div className="p-6 md:p-8 border-t border-gray-200">
-                    <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center"><FaCalendarAlt className="mr-2 text-indigo-600"/>Availability</h2>
-                    {loading.availability ? <FaSpinner className="animate-spin text-indigo-500"/> : (
-                        availability.length > 0 ? (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                                {availability.map(day => (
-                                    <div key={day.date} className="bg-indigo-50 p-4 rounded-lg border border-indigo-200">
-                                        <h4 className="font-semibold text-indigo-700">{new Date(day.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</h4>
-                                        <ul className="mt-2 space-y-1">
-                                            {day.slots.map(slot => (
-                                                <li key={slot} className="text-sm text-gray-700 bg-white px-2 py-1 rounded shadow-sm">{slot}</li>
-                                            ))}
-                                        </ul>
-                                        <Link to={`/patient/appointments/book?doctorId=${doctorId}&date=${day.date}`} className="mt-3 inline-block bg-green-500 hover:bg-green-600 text-white text-xs font-semibold py-1.5 px-3 rounded-md transition-colors">
-                                            Book on this day
-                                        </Link>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : <p className="text-gray-600">No availability information found for the upcoming period. Please check back later or contact the clinic.</p>
-                    )}
-                </div>
-
-                {/* Reviews Section */}
-                <div className="p-6 md:p-8 border-t border-gray-200">
-                    <h2 className="text-xl font-semibold text-gray-800 mb-6 flex items-center"><FaCommentMedical className="mr-2 text-indigo-600"/>Patient Reviews</h2>
-                    {loading.reviews ? <FaSpinner className="animate-spin text-indigo-500"/> : (
-                        reviews.length > 0 ? (
-                            <div className="space-y-6">
-                                {reviews.map(review => <ReviewItem key={review.id} review={review} />)}
-                            </div>
-                        ) : <p className="text-gray-600">No reviews yet for Dr. {doctor.user.last_name}.</p>
-                    )}
-
-                    {/* Add Review Form */}
-                    {user && user.role === 'patient' && (
-                        <form 
-                            onSubmit={handleReviewSubmit} 
-                            className="mt-10 bg-white border border-indigo-100 rounded-xl shadow-lg p-6 sm:p-8 max-w-2xl mx-auto"
-                        >
-                            <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
-                                <FaCommentMedical className="mr-2 text-indigo-600" /> Leave a Review
-                            </h3>
-                            {reviewError && (
-                                <p className="text-red-600 text-sm mb-3 bg-red-100 p-2 rounded">{reviewError}</p>
-                            )}
-                            <div className="mb-4">
-                                <label htmlFor="rating" className="block text-sm font-medium text-gray-700 mb-1">Rating (1-5 Stars)</label>
-                                <select
-                                    name="rating"
-                                    id="rating"
-                                    value={newReview.rating}
-                                    onChange={handleReviewChange}
-                                    className="w-full sm:w-1/3 p-2 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-indigo-400 focus:border-indigo-500 transition"
-                                >
-                                    {[5,4,3,2,1].map(r => (
-                                        <option key={r} value={r}>{r} Star{r>1?'s':''}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div className="mb-6">
-                                <label htmlFor="comment" className="block text-sm font-medium text-gray-700 mb-1">Comment</label>
-                                <textarea
-                                    name="comment"
-                                    id="comment"
-                                    value={newReview.comment}
-                                    onChange={handleReviewChange}
-                                    rows="4"
-                                    required
-                                    className="w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-indigo-400 focus:border-indigo-500 transition"
-                                    placeholder="Share your experience..."
-                                ></textarea>
-                            </div>
-                            <button
-                                type="submit"
-                                disabled={reviewSubmitting}
-                                className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-8 rounded-lg shadow-md flex items-center justify-center text-lg transition-all duration-200 disabled:opacity-70 disabled:cursor-wait"
-                            >
-                                {reviewSubmitting ? (
-                                    <FaSpinner className="animate-spin h-5 w-5 mr-2"/>
-                                ) : (
-                                    <FaPaperPlane className="h-4 w-4 mr-2"/>
-                                )}
-                                {reviewSubmitting ? 'Submitting...' : 'Submit Review'}
-                            </button>
-                        </form>
-                    )}
-                    {!user && (
-                        <p className="mt-8 text-sm text-gray-600 text-center">
-                            <Link to="/login" state={{ from: `/doctors/${doctorId}` }} className="text-indigo-600 hover:underline font-semibold">
-                                Login
-                            </Link> to leave a review.
-                        </p>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const DetailItem = ({icon, label, value}) => (
-    <div className="bg-gray-50 px-4 py-4 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6 border-b border-gray-200 last:border-b-0">
-        <dt className="text-sm font-medium text-gray-500 flex items-center">{React.cloneElement(icon, {className: 'mr-2 h-5 w-5 text-indigo-500'})} {label}</dt>
-        <dd className="mt-1 text-sm text-gray-900 sm:mt-0 sm:col-span-2">{value}</dd>
-    </div>
-);
-
-const ReviewItem = ({ review }) => (
-    <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100">
-        <div className="flex items-center justify-between mb-1">
-            <h4 className="font-semibold text-gray-800">{review.patient.name}</h4>
-            <div className="flex items-center text-yellow-500">
-                {[...Array(review.rating)].map((_, i) => <FaStar key={`rev-star-${i}`} size={14}/>)}
-                {[...Array(5 - review.rating)].map((_, i) => <FaStar key={`rev-empty-${i}`} size={14} className="text-gray-300"/>)}
-            </div>
-        </div>
-        <p className="text-xs text-gray-500 mb-2">{new Date(review.created_at).toLocaleDateString()}</p>
-        <p className="text-sm text-gray-700">{review.comment}</p>
-    </div>
-);
-
-export default PublicDoctorProfileViewPage;
+    return <div className="max-w-4xl mx-auto p-4 md:p-8">
+        <Link to="/doctors" className="text-indigo-700 underline">Back to doctor search</Link>
+        <section className="mt-5 bg-white shadow rounded-xl p-6">
+            <div className="flex gap-5 items-center"><DoctorAvatar key={doctor.id} name={doctor.name} photo={doctor.photo} /><div>
+                <p className="text-indigo-700 font-semibold">{doctor.speciality?.nom}</p>
+                <h1 className="text-3xl font-bold">Dr. {doctor.name}</h1><p className="text-green-700 text-sm mt-1">Verified doctor</p>
+                <p className="text-sm text-gray-600 mt-1">{doctor.rating.total_reviews > 0 ? `${doctor.rating.formatted} / 5 · ${doctor.rating.total_reviews} reviews` : 'No reviews yet'}</p>
+            </div></div>
+            <p className="mt-5 whitespace-pre-line">{doctor.description || 'No biography provided.'}</p>
+            <dl className="mt-5 grid gap-3">
+                <div><dt className="font-semibold">Practice address</dt><dd>{doctor.address || 'Not provided'}</dd></div>
+                <div><dt className="font-semibold">Phone</dt><dd>{doctor.phone || 'Not provided'}</dd></div>
+                <div><dt className="font-semibold">Languages</dt><dd>{doctor.languages.map(language => language.nom).join(', ') || 'Not provided'}</dd></div>
+            </dl>
+        </section>
+        <section className="mt-6 bg-white shadow rounded-xl p-6" aria-labelledby="booking-heading">
+            <h2 id="booking-heading" className="text-2xl font-bold">Book an appointment</h2>
+            <p className="text-gray-600 my-3">Appointments last 30 minutes. All times are in {timezone}.</p>
+            <label className="block">Appointment date<input className="block border rounded p-2 mt-1" type="date" min={profile.meta.today} value={date} disabled={booking} onChange={event => { setSelectedSlot(''); setBookingError(''); setDate(event.target.value); }} /></label>
+            {!date && <p className="mt-4">Choose a date to see available times.</p>}
+            {date && slotLoading && <p role="status" className="mt-4">Loading available times…</p>}
+            {date && slotError && <p role="alert" className="mt-4 text-red-800">{slotError} <button onClick={() => setSlotRetry(value => value + 1)} className="underline">Try again</button></p>}
+            {date && !slotLoading && !slotError && slots.length === 0 && <p role="status" className="mt-4">{slotMeta.is_on_leave ? 'This doctor is on leave on this date.' : 'No available appointments on this date. Please choose another date.'}</p>}
+            {date && !slotLoading && !slotError && slots.length > 0 && <form onSubmit={book} className="mt-5">
+                <fieldset disabled={booking}>
+                    <legend className="font-semibold mb-3">Available times</legend>
+                    <div className="flex flex-wrap gap-3">{slots.map(slot => <label key={slot} className={`border rounded-lg p-3 cursor-pointer ${selectedSlot === slot ? 'border-indigo-600 bg-indigo-50' : ''}`}>
+                        <input className="mr-2" type="radio" name="appointment-time" value={slot} checked={selectedSlot === slot} onChange={() => setSelectedSlot(slot)} />{slot}
+                    </label>)}</div>
+                </fieldset>
+                {canBook && <button type="submit" disabled={!selectedSlot || booking} className="mt-5 bg-indigo-600 text-white rounded py-2 px-5 disabled:opacity-50">{booking ? 'Requesting appointment…' : 'Request appointment'}</button>}
+            </form>}
+            {bookingError && <p role="alert" className="text-red-800 mt-4">{bookingError} <Link to="/patient/appointments" className="underline">My appointments</Link></p>}
+            {!user && <p className="mt-5"><Link to="/login" state={{ from: { pathname: location.pathname, search: date ? `?date=${date}` : location.search } }} className="text-indigo-700 underline">Sign in</Link> as a patient to book an appointment.</p>}
+            {user?.role === 'patient' && !user.email_verified_at && <p className="mt-5"><Link to="/verify-email" className="text-indigo-700 underline">Verify your email</Link> before booking.</p>}
+            {user && user.role !== 'patient' && <p className="mt-5">Appointments can be booked with a patient account.</p>}
+        </section>
+    </div>;
+}
