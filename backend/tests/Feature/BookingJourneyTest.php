@@ -110,17 +110,17 @@ class BookingJourneyTest extends TestCase
     public function test_booking_times_include_the_configured_timezone_offset(): void
     {
         $originalTimezone = date_default_timezone_get();
-        config(['app.timezone' => 'Africa/Casablanca']);
-        date_default_timezone_set('Africa/Casablanca');
+        config(['app.timezone' => 'Asia/Kolkata']);
+        date_default_timezone_set('Asia/Kolkata');
         try {
-            $this->travelTo(Carbon::parse('2026-10-06 08:00:00', 'Africa/Casablanca'));
+            $this->travelTo(Carbon::parse('2026-10-06 08:00:00', 'Asia/Kolkata'));
             $doctor = Doctor::factory()->create(['is_verified' => true, 'is_active' => true, 'horaires' => ['mercredi' => ['09:00-10:00']]]);
             $patient = Patient::factory()->create();
             Sanctum::actingAs($patient->user);
-            $this->getJson('/api/public/doctors/'.$doctor->id.'/slots?date=2026-10-07')->assertJsonPath('meta.timezone', 'Africa/Casablanca');
+            $this->getJson('/api/public/doctors/'.$doctor->id.'/slots?date=2026-10-07')->assertJsonPath('meta.timezone', 'Asia/Kolkata');
             $this->postJson('/api/patient/doctors/'.$doctor->id.'/appointments', ['date_heure' => '2026-10-07 09:00:00'])->assertCreated();
-            $this->getJson('/api/patient/appointments?period=upcoming')->assertJsonPath('meta.timezone', 'Africa/Casablanca')
-                ->assertJsonPath('data.0.starts_at', '2026-10-07T09:00:00+01:00');
+            $this->getJson('/api/patient/appointments?period=upcoming')->assertJsonPath('meta.timezone', 'Asia/Kolkata')
+                ->assertJsonPath('data.0.starts_at', '2026-10-07T09:00:00+05:30');
         } finally {
             date_default_timezone_set($originalTimezone);
         }
