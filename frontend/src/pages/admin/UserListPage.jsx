@@ -48,7 +48,7 @@ export default function UserListPage() {
     return <main className="max-w-6xl mx-auto p-6 space-y-6">
         <h1 className="text-3xl font-bold">User management</h1>
         <p>Deactivate an account to revoke access while preserving appointments, credentials and billing history. Permanent deletion is unavailable. Deactivation does not cancel appointments or provider subscriptions.</p>
-        <form onSubmit={event => { event.preventDefault(); filter('search', draft.trim()); }} className="flex flex-wrap gap-3">
+        <form onSubmit={event => { event.preventDefault(); filter('search', draft.trim()); }} className="filter-bar flex flex-wrap items-end gap-3">
             <label>Search users<input className="block border rounded p-2" value={draft} maxLength={100} onChange={event => setDraft(event.target.value)} placeholder="Name or email" disabled={busy} /></label>
             <button disabled={busy || loading} className="border rounded px-4" type="submit">Search</button>
             <label>Role<select className="block border rounded p-2" value={filters.role} onChange={event => filter('role', event.target.value)} disabled={busy}><option value="">All roles</option>{Object.entries(roles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>

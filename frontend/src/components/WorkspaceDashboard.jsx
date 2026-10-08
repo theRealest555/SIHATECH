@@ -42,15 +42,21 @@ export default function WorkspaceDashboard({ role }) {
         ['/patient/profile', 'Profile', 'Update your contact details and preferred doctor.'],
     ];
     return (
-        <main className="min-h-screen bg-slate-50 px-4 py-8">
+        <main className="workspace-dashboard">
             <div className="mx-auto max-w-5xl space-y-6">
-                <header className="flex flex-wrap items-center justify-between gap-4">
-                    <div><h1 className="text-3xl font-bold text-slate-900">{doctor ? 'Doctor' : 'Patient'} dashboard</h1>
-                        <p className="mt-2 text-slate-600">Your appointments and account tools.</p></div>
-                    <button type="button" onClick={() => setRevision(value => value + 1)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-slate-800">Refresh dashboard</button>
+                <header className="dashboard-header">
+                    <div><p className="eyebrow">{doctor ? 'MAKE ROOM FOR GOOD CARE' : 'YOUR CARE, IN ONE PLACE'}</p><h1>{doctor ? 'Doctor' : 'Patient'} dashboard</h1>
+                        <p>{doctor ? 'Your next consultations and the tools to keep them moving.' : 'Stay on top of your visits and find your next step.'}</p></div>
+                    <button type="button" onClick={() => setRevision(value => value + 1)} className="premium-button secondary"><i className="bi bi-arrow-clockwise" aria-hidden="true" />Refresh dashboard</button>
                 </header>
-                <section aria-labelledby="next-appointments" className="rounded-xl border border-slate-200 bg-white p-6">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="dashboard-metrics">
+                    <article className="metric-card"><h2>Upcoming visits <i className="bi bi-calendar2-week" aria-hidden="true" /></h2><p>{appointments?.meta.total ?? '—'}</p><small>Pending and confirmed appointments</small></article>
+                    <article className="metric-card"><h2>Your workspace <i className="bi bi-person" aria-hidden="true" /></h2><p className="!text-xl">{doctor ? 'Doctor' : 'Patient'}</p><small>Appointments and account tools</small></article>
+                    <article className="metric-card"><h2>{doctor ? 'Submitted credentials' : 'Next appointment'} <i className="bi bi-clock" aria-hidden="true" /></h2><p className="!text-xl">{doctor ? documents?.length ?? '—' : appointments ? appointments.data[0] ? formatAppointmentTime(appointments.data[0].starts_at) : 'None scheduled' : '—'}</p><small>{doctor ? 'Follow reviews in Documents' : 'Times shown in the clinic timezone'}</small></article>
+                    <Link className="metric-card" to={doctor ? '/doctor/availability' : '/doctors'}><h2>{doctor ? 'Consultation hours' : 'Ready for your next visit?'} <i className="bi bi-arrow-up-right" aria-hidden="true" /></h2><p className="!text-xl">{doctor ? 'Set availability' : 'Find a doctor'}</p><small>{doctor ? 'Manage hours and time off' : 'Explore doctors and available times'}</small></Link>
+                </div>
+                <div className="dashboard-columns"><div className="space-y-6"><section aria-labelledby="next-appointments" className="dashboard-panel">
+                    <div className="panel-heading">
                         <h2 id="next-appointments" className="text-xl font-semibold text-slate-900">Upcoming appointments{appointments && ` (${appointments.meta.total})`}</h2>
                         <Link className="text-blue-700 underline" to={`/${role}/appointments`}>Manage appointments</Link>
                     </div>
@@ -76,11 +82,12 @@ export default function WorkspaceDashboard({ role }) {
                     </div>}
                     <Link className="mt-3 inline-block text-blue-700 underline" to="/doctor/documents">View credential details</Link>
                 </section>}
-                <nav aria-label="Account tools" className="grid gap-4 sm:grid-cols-2">
-                    {[...links, ['/my-subscription', 'Subscription and billing', 'Review your plan, payments and subscription status.']].map(([path, title, description]) => <Link key={path} to={path} className="rounded-xl border border-slate-200 bg-white p-6 hover:border-blue-400">
+                </div><div><nav aria-label="Account tools" className="dashboard-panel account-tools">
+                    <div className="panel-heading"><h2>Your next step</h2><i className="bi bi-arrow-down-right" aria-hidden="true" /></div>
+                    {[...links, ['/my-subscription', 'Subscription and billing', 'Review your plan, payments and subscription status.']].map(([path, title, description]) => <Link key={path} to={path}>
                         <h2 className="text-lg font-semibold text-blue-800">{title}</h2><p className="mt-2 text-slate-600">{description}</p>
                     </Link>)}
-                </nav>
+                </nav><section className="dashboard-note"><h2>{doctor ? 'A schedule that works for you.' : 'A little planning goes a long way.'}</h2><p>{doctor ? 'Keep your consultation hours up to date so patients can choose an available time.' : 'Review the date and clinic time before your appointment. You can follow confirmations in your appointment list.'}</p></section></div></div>
             </div>
         </main>
     );

@@ -268,7 +268,7 @@ const DoctorProfile = () => {
   }
 
   return (
-    <Container className="py-4" style={{ background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', minHeight: '100vh' }}>
+    <Container className="py-4 profile-workspace">
       <Row>
         <Col lg={12}>
           {/* Profile Header */}

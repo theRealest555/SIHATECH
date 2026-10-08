@@ -8,6 +8,7 @@ import store from './redux/store';
 import 'bootstrap/dist/css/bootstrap.min.css'; // Bootstrap CSS
 import 'bootstrap-icons/font/bootstrap-icons.css'; // Bootstrap Icons
 import './index.css'; // Tailwind CSS
+import './App.css'; // Design system overrides follow Bootstrap and Tailwind.
 import { AuthProvider } from './contexts/AuthContext.jsx';
 
 ReactDOM.createRoot(document.getElementById('root')).render(

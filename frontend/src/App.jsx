@@ -4,7 +4,6 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import MainLayout from './components/layouts/MainLayout';
 import PrivateRoute from './components/ui/PrivateRoute';
 import { useAuth } from './hooks/useAuth';
-import './App.css'; // Assuming you have a global CSS file for styles
 
 
 // Lazy load pages
