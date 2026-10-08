@@ -2,6 +2,8 @@
 
 These templates prepare the existing React/Laravel application for staging. They do not create hosting, domains, provider accounts or credentials. No service has been purchased or deployed.
 
+For the requested free test environment, see [free hosting setup](free-hosting.md) and run `node deployment/prepare-free-hosting.mjs` to prepare a combined frontend/backend upload bundle.
+
 ## Hosting requirements
 
 Use PHP 8.3 or newer with the extensions required by backend/composer.lock, Composer, a MySQL database, persistent private storage, a shared cache, an asynchronous queue worker and a scheduler. Serve Laravel from backend/public only; never expose the repository root. Serve the built frontend/dist and route React URLs to index.html. Route /api/*, /sanctum/*, /health and /up to Laravel. The provided templates assume both are served on one HTTPS origin. Do not apply them unchanged to unrelated frontend/backend domains.

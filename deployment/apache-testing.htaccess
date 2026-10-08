@@ -1,0 +1,26 @@
+# Install as backend/public/.htaccess ONLY in the combined test deployment.
+# Document root must remain backend/public. Built UI lives in public/frontend.
+Options -MultiViews -Indexes
+DirectoryIndex frontend/index.html
+RewriteEngine On
+
+RewriteCond %{HTTP:Authorization} .
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+# Hidden files are never public, including accidental environment-file uploads.
+RewriteRule (^|/)\. - [F,L]
+
+# Laravel owns all API, CSRF and health requests, including unknown API paths.
+RewriteRule ^(?:api|sanctum)(?:/|$) index.php [END]
+RewriteRule ^(?:health|up)/?$ index.php [END]
+
+# Serve actual built assets and public files normally.
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [END]
+
+# Missing assets must be 404, rather than HTML masquerading as JavaScript.
+RewriteRule ^frontend/ - [R=404,L]
+
+# React Router handles UI navigation, including direct links and page reloads.
+RewriteRule ^ frontend/index.html [END]
